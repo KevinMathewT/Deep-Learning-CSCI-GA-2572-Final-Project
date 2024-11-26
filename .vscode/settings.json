@@ -1,0 +1,11 @@
+{
+    "python.pythonPath": "/home/km6748/DL_Final_Proj/.venv/bin/python",
+    "python.analysis.extraPaths": [
+        "/home/km6748/DL_Final_Proj/.venv/lib/python3.9/site-packages"
+    ],
+    "python.autoComplete.extraPaths": [
+        "/home/km6748/DL_Final_Proj/.venv/lib/python3.9/site-packages"
+    ],
+    "python.venvPath": "/home/km6748/DL_Final_Proj/.venv",
+    "python.envFile": "/home/km6748/DL_Final_Proj/.venv/bin/activate"
+}
