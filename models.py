@@ -4,6 +4,8 @@ from torch import nn
 from torch.nn import functional as F
 import torch
 
+from configs import *
+
 
 def build_mlp(layers_dims: List[int]):
     layers = []
@@ -66,83 +68,52 @@ class Prober(torch.nn.Module):
 
 # --- JEPA Architecture ---
 
-import torch
-import torch.nn as nn
 
 class Encoder(nn.Module):
-    def __init__(self, input_channels=2, repr_dim=256):
+    def __init__(self):
         super().__init__()
         self.conv = nn.Sequential(
-            nn.Conv2d(input_channels, 32, kernel_size=3, stride=2, padding=1),  # (B, 2, 65, 65) -> (B, 32, 33, 33)
-            nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),             # (B, 32, 33, 33) -> (B, 64, 17, 17)
-            nn.ReLU(),
-            nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1),            # (B, 64, 17, 17) -> (B, 128, 9, 9)
+            nn.Conv2d(IN_C, 32, kernel_size=3, stride=2, padding=1),  # (B, 2, 65, 65) -> (B, 32, 33, 33)
             nn.ReLU(),
         )
-        self.fc = nn.Linear(128 * 9 * 9, repr_dim)  # (B, 128*9*9) -> (B, 256)
-
+        self.flatten = nn.Flatten()
+        self.fc = nn.Linear(32 * 33 * 33, EMBED_DIM)  # (B, 32 * 33 * 33) -> (B, EMBED_DIM)
+    
     def forward(self, x):
-        x = self.conv(x)  # (B, 2, 65, 65) -> (B, 128, 9, 9)
-        x = x.view(x.size(0), -1)  # Flatten: (B, 128, 9, 9) -> (B, 128*9*9)
-        x = self.fc(x)  # (B, 128*9*9) -> (B, 256)
+        x = self.conv(x)  # (B, 2, 65, 65) -> (B, 32, 33, 33)
+        x = self.flatten(x)  # (B, 32, 33, 33) -> (B, 32 * 33 * 33)
+        x = self.fc(x)  # (B, 32 * 33 * 33) -> (B, EMBED_DIM)
         return x
-
 
 class Predictor(nn.Module):
-    def __init__(self, repr_dim=256, action_dim=2):
+    def __init__(self):
         super().__init__()
         self.fc = nn.Sequential(
-            nn.Linear(repr_dim + action_dim, repr_dim),  # (B, 256+2) -> (B, 256)
-            nn.ReLU(),
-            nn.Linear(repr_dim, repr_dim),              # (B, 256) -> (B, 256)
+            nn.Linear(EMBED_DIM + ACTION_DIM, EMBED_DIM),  # (B, EMBED_DIM + ACTION_DIM) -> (B, EMBED_DIM)
+            # nn.ReLU(),
+            # nn.Linear(EMBED_DIM, EMBED_DIM),  # (B, EMBED_DIM) -> (B, EMBED_DIM)
         )
 
-    def forward(self, state, action):
-        x = torch.cat([state, action], dim=-1)  # Concatenate: (B, 256) + (B, 2) -> (B, 256+2)
-        x = self.fc(x)  # (B, 256+2) -> (B, 256)
-        return x
-
+    def forward(self, sa):
+        return self.fc(sa)  # (B * (T - 1), EMBED_DIM + ACTION_DIM) -> (B * (T - 1), EMBED_DIM)
 
 class JEPA(nn.Module):
-    def __init__(self, input_channels=2, repr_dim=256, action_dim=2):
+    def __init__(self):
         super().__init__()
-        self.encoder = Encoder(input_channels, repr_dim)
-        self.predictor = Predictor(repr_dim, action_dim)
+        self.enc = Encoder()
+        self.pred = Predictor()
 
-    def forward(self, states, actions):
-        """
-        Args:
-            states: [B, T, 2, 65, 65] - Observations of the environment
-            actions: [B, T-1, 2] - Action vectors (dx, dy)
+    def forward(self, s, a):
+        B, T, C, H, W = s.shape
+        s = s.view(B * T, C, H, W)  # (B * T, 2, 65, 65)
+        enc_s = self.enc(s)  # (B * T, EMBED_DIM)
+        enc_s = enc_s.view(B, T, -1)  # (B, T, EMBED_DIM)
+        preds = torch.zeros_like(enc_s)  # (B, T, EMBED_DIM)
+        preds[:, 0, :] = enc_s[:, 0, :]  # (B, EMBED_DIM)
+        sa_pairs = torch.cat([enc_s[:, :-1, :], a], dim=-1)  # (B, T-1, EMBED_DIM + ACTION_DIM)
+        sa_pairs = sa_pairs.view(-1, EMBED_DIM + ACTION_DIM)  # (B * (T - 1), EMBED_DIM + ACTION_DIM)
+        pred_states = self.pred(sa_pairs)  # (B * (T - 1), EMBED_DIM)
+        preds[:, 1:, :] = pred_states.view(B, T-1, EMBED_DIM)  # (B, T, EMBED_DIM)
+        # preds has first timestep prediction same as input itself - after that every timestep pred is derived from the previous
+        return preds
 
-        Returns:
-            predictions: [B, T, 256] - Predicted representations for each timestep
-        """
-        batch_size, seq_len, _, _, _ = states.shape
-        repr_dim = self.encoder.fc.out_features  # Dimension of the representation
-
-        # Reshape states for the encoder
-        states = states.view(-1, *states.shape[2:])  # (B, T, 2, 65, 65) -> (B*T, 2, 65, 65)
-
-        # Encode all states
-        encoded_states = self.encoder(states)  # (B*T, 2, 65, 65) -> (B*T, 256)
-
-        # Reshape back to (B, T, D)
-        encoded_states = encoded_states.view(batch_size, seq_len, repr_dim)  # (B*T, 256) -> (B, T, 256)
-
-        # Initialize output tensor for predictions
-        predictions = torch.zeros_like(encoded_states).to(states.device)  # (B, T, 256)
-
-        # Use the first timestep's encoding as the initial state
-        prev_state = encoded_states[:, 0]  # (B, 256)
-
-        # Iterate through timesteps for prediction
-        for t in range(seq_len - 1):
-            predictions[:, t] = prev_state  # Store the current prediction
-            prev_state = self.predictor(prev_state, actions[:, t])  # Predict the next state
-
-        # Add the final prediction
-        predictions[:, -1] = prev_state  # (B, 256)
-
-        return predictions  # (B, T, 256)

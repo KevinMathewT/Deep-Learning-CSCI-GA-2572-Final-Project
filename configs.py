@@ -1,3 +1,16 @@
+# CONFIG CONSTANTS
+
+EMBED_DIM = 256
+ACTION_DIM = 2
+IN_C = 2
+
+
+
+
+
+
+
+
 import argparse
 import dataclasses
 from dataclasses import dataclass
