@@ -3,8 +3,9 @@
 EMBED_DIM = 256
 ACTION_DIM = 2
 IN_C = 2
-
-
+EPOCHS = 20
+BS = 1024
+LR = 0.001
 
 
 

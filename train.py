@@ -1,43 +1,62 @@
+import wandb
 from accelerate import Accelerator
 import torch
 import torch.nn.functional as F
 from torch.nn.utils import clip_grad_norm_
-from dataset import create_wall_dataloader
+from dataset import WallDataset
 from models import JEPA
 from tqdm import tqdm
+import numpy as np
+
+from configs import *
+from utils import seed_everything, log_embeddings_wandb
+from engine import train_one_epoch, val_one_epoch
+
 
 def setup():
     acc = Accelerator()
     device = acc.device
 
     data_path = "/scratch/DL24FA/train"
-    dl = create_wall_dataloader(data_path, probing=False, device=device, batch_size=1028, train=True)
+    
+    # Load the dataset and split into train and validation datasets
+    full_dataset = WallDataset(data_path, probing=False, device=device)
+    train_size = int(0.8 * len(full_dataset))
+    val_size = len(full_dataset) - train_size
+    train_dataset, val_dataset = torch.utils.data.random_split(full_dataset, [train_size, val_size])
+    
+    # Create train and validation data loaders
+    tdl = torch.utils.data.DataLoader(
+        train_dataset, batch_size=BS, shuffle=True, drop_last=True, pin_memory=False
+    )
+    vdl = torch.utils.data.DataLoader(
+        val_dataset, batch_size=BS, shuffle=False, drop_last=False, pin_memory=False
+    )
 
     model = JEPA().to(device)
-    opt = torch.optim.Adam(model.parameters(), lr=0.0002)
+    opt = torch.optim.Adam(model.parameters(), lr=LR)
 
-    model, opt, dl = acc.prepare(model, opt, dl)
-    return acc, model, opt, dl
+    # Prepare the components with the Accelerator
+    model, opt, tdl, vdl = acc.prepare(model, opt, tdl, vdl)
+    return acc, model, opt, tdl, vdl
+
 
 def train_jepa():
-    acc, model, opt, dl = setup()
-    model.train()
+    # Initialize wandb
+    wandb.init(project="DL Final Project", config={"learning_rate": LR, "batch_size": BS, "epochs": EPOCHS})
 
-    for epoch in range(20):
-        total_loss = 0
-        for batch in tqdm(dl, desc=f"Epoch {epoch + 1}/20"):
-            states, actions = batch.states, batch.actions
-            opt.zero_grad()
-            preds = model(states, actions)
-            B, T, _, _, _ = states.shape
-            enc = model.encoder(states.view(-1, *states.shape[2:])).view(B, T, -1)
-            loss = F.mse_loss(preds[:, :-1], enc[:, 1:])
-            acc.backward(loss)
-            opt.step()
-            total_loss += loss.item()
-        acc.print(f"Epoch {epoch + 1}, Loss: {total_loss / len(dl):.5f}")
+    acc, model, opt, tdl, vdl = setup()
+    step = 0  # Initialize step counter locally
+
+    for epoch in range(EPOCHS):
+        step, avg_epoch_loss = train_one_epoch(epoch, model, opt, tdl, vdl, acc, step, k=2)  # Correctly unpack
+        acc.print(f"[{epoch + 1}/{EPOCHS}] train epoch loss: {avg_epoch_loss:.5f}")  # Log the average loss for the epoch
 
     acc.save_state("weights/jepa_model_weights")
+    wandb.finish()
+
+
 
 if __name__ == "__main__":
+    seed_everything(42)  # Set the seed for reproducibility
     train_jepa()
