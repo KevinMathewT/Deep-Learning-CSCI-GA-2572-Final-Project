@@ -1,17 +1,3 @@
-# CONFIG CONSTANTS
-
-EMBED_DIM = 256
-ACTION_DIM = 2
-IN_C = 2
-EPOCHS = 20
-BS = 1024
-LR = 0.001
-
-
-
-
-
-
 import argparse
 import dataclasses
 from dataclasses import dataclass
@@ -22,6 +8,78 @@ from omegaconf import OmegaConf
 
 DataClass = Any
 DataClassType = Any
+
+
+import dataclasses
+from typing import Any, Dict, Type, TypeVar, Union
+
+T = TypeVar("T")
+
+
+class DataclassArgParser:
+    """Utility class to populate dataclasses from dictionaries."""
+
+    @staticmethod
+    def _populate_dataclass_from_dict(cls: Type[T], inputs: Dict[str, Any]) -> T:
+        """
+        Populates a dataclass instance from a dictionary.
+        Handles nested dataclasses by recursively populating them.
+        """
+        if not dataclasses.is_dataclass(cls):
+            raise ValueError(f"{cls} is not a dataclass")
+
+        # Extract field names and types
+        field_names = {field.name: field.type for field in dataclasses.fields(cls)}
+        
+        # Create an instance of the dataclass
+        obj = cls()
+        
+        for key, value in inputs.items():
+            if key in field_names:
+                field_type = field_names[key]
+                if dataclasses.is_dataclass(field_type):
+                    # Recursively populate nested dataclasses
+                    nested_obj = DataclassArgParser._populate_dataclass_from_dict(
+                        field_type, value
+                    )
+                    setattr(obj, key, nested_obj)
+                else:
+                    # Assign value directly for non-dataclass fields
+                    setattr(obj, key, value)
+        return obj
+
+    @staticmethod
+    def _populate_dataclass_from_flat_dict(cls: Type[T], inputs: Dict[str, Any]) -> T:
+        """
+        Populates a dataclass instance from a flat dictionary.
+        Nested fields are expected to use dot notation (e.g., 'field.subfield').
+        """
+        if not dataclasses.is_dataclass(cls):
+            raise ValueError(f"{cls} is not a dataclass")
+
+        # Extract field names and types
+        field_names = {field.name: field.type for field in dataclasses.fields(cls)}
+        
+        # Create an instance of the dataclass
+        obj = cls()
+        
+        for key, value in inputs.items():
+            parts = key.split(".")
+            current_obj = obj
+            for i, part in enumerate(parts):
+                if i == len(parts) - 1:  # Last part is the actual value
+                    if part in field_names:
+                        setattr(current_obj, part, value)
+                else:
+                    # Navigate or create nested objects
+                    if hasattr(current_obj, part):
+                        next_obj = getattr(current_obj, part)
+                    else:
+                        next_obj_type = field_names.get(part)
+                        next_obj = next_obj_type()
+                        setattr(current_obj, part, next_obj)
+                    current_obj = next_obj
+        return obj
 
 
 @dataclass
@@ -61,3 +119,17 @@ class ConfigBase:
     def save(self, path: str):
         with open(path, "w") as f:
             OmegaConf.save(config=self, f=f)
+
+
+# New JEPAConfig class
+@dataclass
+class JEPAConfig(ConfigBase):
+    embed_dim: int = 256
+    action_dim: int = 2
+    in_c: int = 2
+    epochs: int = 20
+    batch_size: int = 1024
+    learning_rate: float = 0.001
+    model_type: str = 'JEPA'
+    data_path: str = '/scratch/DL24FA/train'
+    # You can add more configuration parameters as needed

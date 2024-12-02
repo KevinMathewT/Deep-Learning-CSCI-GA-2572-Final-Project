@@ -4,7 +4,9 @@ from torch import nn
 from torch.nn import functional as F
 import torch
 
-from configs import *
+from configs import JEPAConfig
+
+from typing import Dict
 
 
 def build_mlp(layers_dims: List[int]):
@@ -66,54 +68,489 @@ class Prober(torch.nn.Module):
         output = self.prober(e)
         return output
 
+
 # --- JEPA Architecture ---
 
 
-class Encoder(nn.Module):
-    def __init__(self):
+class BaseModel(nn.Module):
+    def __init__(self, config):
         super().__init__()
+        self.config = config
+
+    def forward(self, *args, **kwargs):
+        raise NotImplementedError
+
+    def training_step(self, batch):
+        raise NotImplementedError
+
+    def validation_step(self, batch):
+        raise NotImplementedError
+
+
+# Encoder class adjusted to accept config
+class Encoder(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
         self.conv = nn.Sequential(
-            nn.Conv2d(IN_C, 32, kernel_size=3, stride=2, padding=1),  # (B, 2, 65, 65) -> (B, 32, 33, 33)
+            nn.Conv2d(config.in_c, 32, kernel_size=3, stride=2, padding=1),  # Conv2d layer
             nn.ReLU(),
         )
         self.flatten = nn.Flatten()
-        self.fc = nn.Linear(32 * 33 * 33, EMBED_DIM)  # (B, 32 * 33 * 33) -> (B, EMBED_DIM)
+        self.fc = nn.Linear(32 * 33 * 33, config.embed_dim)  # Fully connected layer
     
     def forward(self, x):
-        x = self.conv(x)  # (B, 2, 65, 65) -> (B, 32, 33, 33)
-        x = self.flatten(x)  # (B, 32, 33, 33) -> (B, 32 * 33 * 33)
-        x = self.fc(x)  # (B, 32 * 33 * 33) -> (B, EMBED_DIM)
-        return x
+        # x: (B*T, C, H, W) = (B*T, 2, 65, 65)
+        x = self.conv(x)  # (B*T, 2, 65, 65) -> (B*T, 32, 33, 33)
+        x = self.flatten(x)  # (B*T, 32, 33, 33) -> (B*T, 32*33*33)
+        x = self.fc(x)  # (B*T, 32*33*33) -> (B*T, embed_dim)
+        return x  # (B*T, embed_dim)
 
+# Predictor class adjusted to accept config
 class Predictor(nn.Module):
-    def __init__(self):
+    def __init__(self, config):
         super().__init__()
+        self.config = config
+        self.action_proj = nn.Linear(config.action_dim, config.embed_dim)  # Project action to embed_dim
+        # Optionally, you can add a projection for the state embedding
+        # self.state_proj = nn.Linear(config.embed_dim, config.embed_dim)
+        # For simplicity, we'll assume identity for state embedding
+
         self.fc = nn.Sequential(
-            nn.Linear(EMBED_DIM + ACTION_DIM, EMBED_DIM),  # (B, EMBED_DIM + ACTION_DIM) -> (B, EMBED_DIM)
-            # nn.ReLU(),
-            # nn.Linear(EMBED_DIM, EMBED_DIM),  # (B, EMBED_DIM) -> (B, EMBED_DIM)
+            nn.ReLU(),
+            nn.Linear(config.embed_dim, config.embed_dim),  # Further processing
+        )
+        
+    def forward(self, s_embed, a):
+        # s_embed: (B*(T-1), embed_dim)
+        # a: (B*(T-1), action_dim)
+        a_proj = self.action_proj(a)  # (B*(T-1), embed_dim)
+        # s_proj = self.state_proj(s_embed)  # If projecting s_embed
+        s_proj = s_embed  # If not projecting s_embed
+
+        x = s_proj + a_proj  # Element-wise addition: (B*(T-1), embed_dim)
+        x = self.fc(x)  # Further processing: (B*(T-1), embed_dim)
+        return x  # (B*(T-1), embed_dim)
+
+
+# JEPA model adjusted to accept config
+class JEPA(BaseModel):
+    def __init__(self, config):
+        super().__init__(config)
+        self.enc = Encoder(config)
+        self.pred = Predictor(config)
+        self.optimizer = torch.optim.Adam(self.parameters(), lr=config.learning_rate)
+
+    def forward(self, s, a):
+        B, T, C, H, W = s.shape  # s: (B, T, C, H, W)
+        s = s.view(B * T, C, H, W)  # Reshape to (B*T, C, H, W)
+        enc_s = self.enc(s)  # (B*T, embed_dim)
+        enc_s = enc_s.view(B, T, -1)  # (B, T, embed_dim)
+        preds = torch.zeros_like(enc_s)  # preds: (B, T, embed_dim)
+        preds[:, 0, :] = enc_s[:, 0, :]  # Initialize first timestep
+
+        # Prepare inputs for the predictor
+        s_embed = enc_s[:, :-1, :]  # (B, T-1, embed_dim)
+        s_embed = s_embed.reshape(-1, self.config.embed_dim)  # (B*(T-1), embed_dim)
+        a = a.reshape(-1, self.config.action_dim)  # (B*(T-1), action_dim)
+
+        pred_states = self.pred(s_embed, a)  # (B*(T-1), embed_dim)
+        pred_states = pred_states.view(B, T - 1, self.config.embed_dim)  # (B, T-1, embed_dim)
+        preds[:, 1:, :] = pred_states  # Assign predictions to preds
+
+        return preds, enc_s  # preds: (B, T, embed_dim), enc_s: (B, T, embed_dim)
+
+    def compute_loss(self, preds, enc_s):
+        # preds, enc_s: (B, T, embed_dim)
+        loss = F.mse_loss(preds[:, 1:], enc_s[:, 1:])  # Compute MSE loss for timesteps 1 to T-1
+        return loss
+
+    def compute_vicreg_loss(self, preds, enc_s, lambda_invariance=1.0, mu_variance=100.0, nu_covariance=25.0, gamma=1.0, epsilon=1e-4):
+        """
+        Compute VICReg loss with invariance, variance, and covariance terms.
+        
+        Args:
+            preds: Predicted embeddings from the predictor. Shape (B, T, embed_dim).
+            enc_s: Target embeddings from the encoder. Shape (B, T, embed_dim).
+            lambda_invariance: Weight for invariance term.
+            mu_variance: Weight for variance term.
+            nu_covariance: Weight for covariance term.
+            gamma: Target standard deviation for variance term.
+            epsilon: Small value to avoid numerical instability.
+            
+        Returns:
+            vicreg_loss: The combined VICReg loss.
+        """
+        preds, enc_s = preds[:, 1:], enc_s[:, 1:]
+
+        # Flatten temporal dimensions for batch processing
+        B, T, embed_dim = preds.shape
+        Z = preds.reshape(B * T, embed_dim)  # Predicted embeddings
+        Z_prime = enc_s.reshape(B * T, embed_dim)  # Target embeddings
+        
+        # --- Invariance Term ---
+        invariance_loss = torch.mean(torch.sum((Z - Z_prime) ** 2, dim=1))  # Mean squared Euclidean distance
+        
+        # --- Variance Term ---
+        # Compute standard deviation along the batch dimension
+        std_Z = torch.sqrt(Z.var(dim=0, unbiased=False) + epsilon)
+        std_Z_prime = torch.sqrt(Z_prime.var(dim=0, unbiased=False) + epsilon)
+        
+        variance_loss = torch.mean(F.relu(gamma - std_Z)) + torch.mean(F.relu(gamma - std_Z_prime))
+        
+        # --- Covariance Term ---
+        # Center the embeddings
+        Z_centered = Z - Z.mean(dim=0, keepdim=True)
+        Z_prime_centered = Z_prime - Z_prime.mean(dim=0, keepdim=True)
+        
+        # Compute covariance matrices
+        cov_Z = (Z_centered.T @ Z_centered) / (B * T - 1)
+        cov_Z_prime = (Z_prime_centered.T @ Z_prime_centered) / (B * T - 1)
+        
+        # Sum of squared off-diagonal elements
+        cov_loss_Z = torch.sum(cov_Z ** 2) - torch.sum(torch.diag(cov_Z) ** 2)
+        cov_loss_Z_prime = torch.sum(cov_Z_prime ** 2) - torch.sum(torch.diag(cov_Z_prime) ** 2)
+        
+        covariance_loss = cov_loss_Z + cov_loss_Z_prime
+        
+        # --- Total VICReg Loss ---
+        vicreg_loss = (
+            lambda_invariance * invariance_loss
+            + mu_variance * variance_loss
+            + nu_covariance * covariance_loss
+        )
+        
+        return vicreg_loss, invariance_loss, variance_loss, covariance_loss
+
+
+    def training_step(self, batch):
+        states, actions = batch.states, batch.actions
+        preds, enc_s = self.forward(states, actions)
+
+        # loss = self.compute_loss(preds, enc_s) # Normal Loss Calculation
+        loss, invariance_loss, variance_loss, covariance_loss = self.compute_vicreg_loss(preds, enc_s) # VICReg Loss Calculation
+
+
+        self.optimizer.zero_grad()
+        loss.backward()
+
+        # Compute grad_norm without clipping
+        grad_norm = 0.0
+        for p in self.parameters():
+            if p.grad is not None:
+                param_norm = p.grad.data.norm(2)
+                grad_norm += param_norm.item() ** 2
+        grad_norm = grad_norm ** 0.5
+
+        self.optimizer.step()
+        learning_rate = self.optimizer.param_groups[0]['lr']
+
+        # Compute the absolute value of the action weights
+        action_weight = self.pred.action_proj.weight  # Get weights from the action projection layer
+        action_weight_abs = action_weight.abs().mean().item()  # Compute the mean absolute value
+
+        # Compute deviation from identity for fc layer
+        fc_weight = self.pred.fc[1].weight  # Get the weights of the Linear layer inside fc
+        identity_matrix = torch.eye(fc_weight.size(0), fc_weight.size(1)).to(fc_weight.device)
+        deviation_from_identity = torch.norm(fc_weight - identity_matrix, p='fro') / torch.norm(identity_matrix, p='fro')
+
+        # Prepare the output dictionary
+        output = {
+            'loss': loss.item(),
+            'grad_norm': grad_norm,
+            'learning_rate': learning_rate,
+            'action_weight_abs': action_weight_abs,
+            'deviation_from_identity_pred_final_proj': deviation_from_identity.item(),  # Log the deviation
+            'invariance_loss': invariance_loss,
+            'variance_loss': variance_loss,
+            'covariance_loss': covariance_loss,
+            # Add more loggable values here if needed
+        }
+
+        # Non-loggable data
+        output['non_logs'] = {
+            'states': states.detach(),
+            'actions': actions.detach(),
+            'enc_embeddings': enc_s.detach(),
+            'pred_embeddings': preds.detach(),
+        }
+
+        return output
+
+    def validation_step(self, batch):
+        states, actions = batch.states, batch.actions
+        preds, enc_s = self.forward(states, actions)
+        loss = self.compute_loss(preds, enc_s)
+        learning_rate = self.optimizer.param_groups[0]['lr']
+
+        # Compute the absolute value of the action weights
+        action_weight = self.pred.action_proj.weight  # Get weights from the action projection layer
+        action_weight_abs = action_weight.abs().mean().item()  # Compute the mean absolute value
+
+        # Compute deviation from identity for fc layer
+        fc_weight = self.pred.fc[1].weight  # Get the weights of the Linear layer inside fc
+        identity_matrix = torch.eye(fc_weight.size(0), fc_weight.size(1)).to(fc_weight.device)
+        deviation_from_identity = torch.norm(fc_weight - identity_matrix, p='fro') / torch.norm(identity_matrix, p='fro')
+
+        # Prepare the output dictionary
+        output = {
+            'loss': loss.item(),
+            'learning_rate': learning_rate,
+            'action_weight_abs': action_weight_abs,
+            'deviation_from_identity_pred_final_proj': deviation_from_identity.item(),  # Log the deviation
+        }
+
+        # Non-loggable data
+        output['non_logs'] = {
+            'states': states.detach(),
+            'actions': actions.detach(),
+            'enc_embeddings': enc_s.detach(),
+            'pred_embeddings': preds.detach(),
+        }
+
+        return output
+
+# AdversarialJEPA model adjusted to accept config
+class Discriminator(nn.Module):
+    def __init__(self, input_dim):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(input_dim, input_dim),
+            nn.ReLU(),
+            nn.Linear(input_dim, 1),
+            nn.Sigmoid()
         )
 
-    def forward(self, sa):
-        return self.fc(sa)  # (B * (T - 1), EMBED_DIM + ACTION_DIM) -> (B * (T - 1), EMBED_DIM)
+    def forward(self, x):
+        # x: (N, input_dim)
+        return self.net(x)  # (N, input_dim) -> (N, 1)
 
-class JEPA(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.enc = Encoder()
-        self.pred = Predictor()
+class AdversarialJEPA(BaseModel):
+    def __init__(self, config):
+        super().__init__(config)
+        self.enc = Encoder(config)
+        self.pred = Predictor(config)
+        self.disc = Discriminator(config.embed_dim)
+        self.enc_opt = torch.optim.Adam(self.enc.parameters(), lr=config.learning_rate)
+        self.pred_opt = torch.optim.Adam(self.pred.parameters(), lr=config.learning_rate)
+        self.disc_opt = torch.optim.Adam(self.disc.parameters(), lr=config.learning_rate)
 
     def forward(self, s, a):
         B, T, C, H, W = s.shape
-        s = s.view(B * T, C, H, W)  # (B * T, 2, 65, 65)
-        enc_s = self.enc(s)  # (B * T, EMBED_DIM)
-        enc_s = enc_s.view(B, T, -1)  # (B, T, EMBED_DIM)
-        preds = torch.zeros_like(enc_s)  # (B, T, EMBED_DIM)
-        preds[:, 0, :] = enc_s[:, 0, :]  # (B, EMBED_DIM)
-        sa_pairs = torch.cat([enc_s[:, :-1, :], a], dim=-1)  # (B, T-1, EMBED_DIM + ACTION_DIM)
-        sa_pairs = sa_pairs.view(-1, EMBED_DIM + ACTION_DIM)  # (B * (T - 1), EMBED_DIM + ACTION_DIM)
-        pred_states = self.pred(sa_pairs)  # (B * (T - 1), EMBED_DIM)
-        preds[:, 1:, :] = pred_states.view(B, T-1, EMBED_DIM)  # (B, T, EMBED_DIM)
-        # preds has first timestep prediction same as input itself - after that every timestep pred is derived from the previous
-        return preds
+        s = s.view(B * T, C, H, W)  # (B*T, C, H, W)
+        enc_s = self.enc(s)  # (B*T, C, H, W) -> (B*T, embed_dim)
+        enc_s = enc_s.view(B, T, -1)  # (B*T, embed_dim) -> (B, T, embed_dim)
+        preds = torch.zeros_like(enc_s)  # (B, T, embed_dim)
+        preds[:, 0, :] = enc_s[:, 0, :]
+        sa_pairs = torch.cat([enc_s[:, :-1, :], a], dim=-1)  # (B, T-1, embed_dim + action_dim)
+        sa_pairs = sa_pairs.view(-1, self.config.embed_dim + self.config.action_dim)  # (B*(T-1), embed_dim + action_dim)
+        pred_states = self.pred(sa_pairs)  # (B*(T-1), embed_dim)
+        pred_states = pred_states.view(B, T - 1, self.config.embed_dim)  # (B, T-1, embed_dim)
+        preds[:, 1:, :] = pred_states
+        return preds, enc_s
 
+    def compute_losses(self, preds, enc_s):
+        real_embeds = enc_s[:, 1:].reshape(-1, self.config.embed_dim)  # (B*(T-1), embed_dim)
+        fake_embeds = preds[:, 1:].detach().reshape(-1, self.config.embed_dim)  # (B*(T-1), embed_dim)
+
+        real_labels = torch.ones(real_embeds.size(0), 1).to(real_embeds.device)  # (B*(T-1), 1)
+        fake_labels = torch.zeros(fake_embeds.size(0), 1).to(fake_embeds.device)  # (B*(T-1), 1)
+
+        real_preds = self.disc(real_embeds)  # (B*(T-1), 1)
+        fake_preds = self.disc(fake_embeds)  # (B*(T-1), 1)
+
+        disc_loss_real = F.binary_cross_entropy(real_preds, real_labels)
+        disc_loss_fake = F.binary_cross_entropy(fake_preds, fake_labels)
+        disc_loss = (disc_loss_real + disc_loss_fake) / 2
+
+        # Generator (Predictor) loss
+        gen_preds = self.disc(preds[:, 1:].reshape(-1, self.config.embed_dim))  # (B*(T-1), 1)
+        pred_labels = torch.ones(gen_preds.size(0), 1).to(gen_preds.device)  # (B*(T-1), 1)
+        gen_loss = F.binary_cross_entropy(gen_preds, pred_labels)
+
+        # Reconstruction loss
+        rec_loss = F.mse_loss(preds[:, 1:], enc_s[:, 1:])  # (B, T-1, embed_dim)
+
+        # Total loss
+        total_loss = gen_loss + rec_loss
+
+        return disc_loss, total_loss
+
+    def training_step(self, batch):
+        states, actions = batch.states, batch.actions
+        preds, enc_s = self.forward(states, actions)
+
+        # Update Discriminator
+        disc_loss, total_loss = self.compute_losses(preds, enc_s)
+        self.disc_opt.zero_grad()
+        disc_loss.backward(retain_graph=True)
+        self.disc_opt.step()
+
+        # Update Encoder and Predictor
+        self.enc_opt.zero_grad()
+        self.pred_opt.zero_grad()
+        total_loss.backward()
+
+        # Compute grad_norm without clipping
+        grad_norm = 0.0
+        for p in list(self.enc.parameters()) + list(self.pred.parameters()):
+            if p.grad is not None:
+                param_norm = p.grad.data.norm(2)
+                grad_norm += param_norm.item() ** 2
+        grad_norm = grad_norm ** 0.5
+
+        self.enc_opt.step()
+        self.pred_opt.step()
+
+        learning_rate = self.enc_opt.param_groups[0]['lr']  # Assuming same LR for all optimizers
+
+        # Prepare the output dictionary
+        output = {
+            'loss': total_loss.item(),
+            'disc_loss': disc_loss.item(),
+            'grad_norm': grad_norm,
+            'learning_rate': learning_rate,
+        }
+
+        # Non-loggable data
+        output['non_logs'] = {
+            'states': states.detach(),
+            'actions': actions.detach(),
+            'enc_embeddings': enc_s.detach(),
+            'pred_embeddings': preds.detach(),
+        }
+
+        return output
+
+    def validation_step(self, batch):
+        states, actions = batch.states, batch.actions
+        preds, enc_s = self.forward(states, actions)
+        disc_loss, total_loss = self.compute_losses(preds, enc_s)
+        learning_rate = self.enc_opt.param_groups[0]['lr']
+
+        # Prepare the output dictionary
+        output = {
+            'loss': total_loss.item(),
+            'disc_loss': disc_loss.item(),
+            'learning_rate': learning_rate,
+        }
+
+        # Non-loggable data
+        output['non_logs'] = {
+            'states': states.detach(),
+            'actions': actions.detach(),
+            'enc_embeddings': enc_s.detach(),
+            'pred_embeddings': preds.detach(),
+        }
+
+        return output
+
+# InfoMaxJEPA model adjusted to accept config
+class InfoMaxJEPA(BaseModel):
+    def __init__(self, config):
+        super().__init__(config)
+        self.enc = Encoder(config)
+        self.pred = Predictor(config)
+        self.optimizer = torch.optim.Adam(self.parameters(), lr=config.learning_rate)
+
+    def forward(self, s, a):
+        B, T, C, H, W = s.shape  # s: (B, T, C, H, W)
+        s = s.view(B * T, C, H, W)  # (B*T, C, H, W)
+        enc_s = self.enc(s)  # (B*T, embed_dim)
+        enc_s = enc_s.view(B, T, -1)  # (B, T, embed_dim)
+        sa_pairs = torch.cat([enc_s[:, :-1, :], a], dim=-1)  # (B, T-1, embed_dim + action_dim)
+        sa_pairs = sa_pairs.view(-1, self.config.embed_dim + self.config.action_dim)  # (B*(T-1), embed_dim + action_dim)
+        pred_states = self.pred(sa_pairs)  # (B*(T-1), embed_dim)
+        pred_states = pred_states.view(B, T - 1, self.config.embed_dim)  # (B, T-1, embed_dim)
+        return pred_states, enc_s[:, 1:, :]  # Return predictions and targets
+
+    def compute_loss(self, preds, targets):
+        B, T_minus_1, D = preds.shape  # preds: (B, T-1, embed_dim)
+        preds = preds.reshape(B * T_minus_1, D)  # (B*(T-1), embed_dim)
+        targets = targets.reshape(B * T_minus_1, D)  # (B*(T-1), embed_dim)
+
+        preds = F.normalize(preds, dim=-1)  # Normalize embeddings
+        targets = F.normalize(targets, dim=-1)
+
+        logits = torch.matmul(preds, targets.t())  # (B*(T-1), B*(T-1))
+        labels = torch.arange(B * T_minus_1).to(preds.device)  # (B*(T-1))
+
+        temperature = 0.07
+        logits = logits / temperature
+
+        loss = F.cross_entropy(logits, labels)
+        return loss
+
+    def training_step(self, batch):
+        states, actions = batch.states, batch.actions
+        preds, targets = self.forward(states, actions)
+        loss, temperature = self.compute_loss(preds, targets)
+        self.optimizer.zero_grad()
+        loss.backward()
+
+        # Compute grad_norm without clipping
+        grad_norm = 0.0
+        for p in self.parameters():
+            if p.grad is not None:
+                param_norm = p.grad.data.norm(2)
+                grad_norm += param_norm.item() ** 2
+        grad_norm = grad_norm ** 0.5
+
+        self.optimizer.step()
+        learning_rate = self.optimizer.param_groups[0]['lr']
+
+        # Prepare the output dictionary
+        output = {
+            'loss': loss.item(),
+            'grad_norm': grad_norm,
+            'learning_rate': learning_rate,
+            'temperature': temperature,
+        }
+
+        # Non-loggable data
+        output['non_logs'] = {
+            'states': states[:, 1:, :, :, :].detach(),
+            'actions': actions.detach(),
+            'enc_embeddings': targets.detach(),
+            'pred_embeddings': preds.detach(),
+        }
+
+        return output
+
+    def validation_step(self, batch):
+        states, actions = batch.states, batch.actions
+        preds, targets = self.forward(states, actions)
+        loss, temperature = self.compute_loss(preds, targets)
+        learning_rate = self.optimizer.param_groups[0]['lr']
+
+        # Prepare the output dictionary
+        output = {
+            'loss': loss.item(),
+            'learning_rate': learning_rate,
+            'temperature': temperature,
+        }
+
+        # Non-loggable data
+        output['non_logs'] = {
+            'states': states[:, 1:, :, :, :].detach(),
+            'actions': actions.detach(),
+            'enc_embeddings': targets.detach(),
+            'pred_embeddings': preds.detach(),
+        }
+
+        return output
+
+
+# Model mapping and get_model function
+MODEL_MAP: Dict[str, BaseModel] = {
+    'JEPA': JEPA,
+    'AdversarialJEPA': AdversarialJEPA,
+    'InfoMaxJEPA': InfoMaxJEPA,
+    # Add more models here as needed
+}
+
+def get_model(model_name: str):
+    model_class = MODEL_MAP.get(model_name)
+    if model_class is None:
+        raise ValueError(f"Unknown model type: {model_name}. Available models are: {list(MODEL_MAP.keys())}")
+    return model_class

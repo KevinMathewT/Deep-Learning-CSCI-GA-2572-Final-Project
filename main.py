@@ -1,7 +1,7 @@
 from dataset import create_wall_dataloader
 from evaluator import ProbingEvaluator
 import torch
-from models import MockModel
+from models import MockModel, JEPA
 import glob
 
 
@@ -13,7 +13,7 @@ def get_device():
 
 
 def load_data(device):
-    data_path = "/scratch/DL24FA/dl_final_project"
+    data_path = "/scratch/DL24FA"
 
     probe_train_ds = create_wall_dataloader(
         data_path=f"{data_path}/probe_normal/train",
@@ -44,7 +44,9 @@ def load_data(device):
 def load_model():
     """Load or initialize the model."""
     # TODO: Replace MockModel with your trained model
-    model = MockModel()
+    # model = MockModel()
+    config = JEPAConfig.parse_from_file(args.config)
+    model = JEPA()
     return model
 
 
