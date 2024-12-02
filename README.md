@@ -148,4 +148,4 @@ team_name.txt contains the name of your team and members' NETIDs.
 
 Upload the zipped file to cloud storage and email the download link to TA wz1232@nyu.edu with subject line **"DL Final Project Submission. {Team Name}"**. The TA should be able to run `wget {link}`, unzip the folder, and run `python main.py` to get validation results. Failing to do so will result in substracted scores or even zero points. 
 
-**Submission deadline is 12/15**. Winners will be picked and asked to present their work on last class day 12/18.
+**Submission deadline is 12/14 11:59PM**. Winners will be picked and asked to present their work on last class day 12/18.
