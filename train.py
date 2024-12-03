@@ -59,7 +59,8 @@ def train_jepa(config):
     print("WandB initialized.")
     print("Logging files to WandB...")
 
-    for f in log_files_by_extensions([".py", ".yaml", ".json", ".ipynb", ".md", ".txt", ".sh", ".gitignore", ".lock", ".toml"]):
+    files = log_files_by_extensions([".py", ".yaml", ".json", ".ipynb", ".md", ".txt", ".sh", ".gitignore", ".lock", ".toml"])
+    for f in files:
         wandb.save(f)
 
     print('WandB logging complete.')

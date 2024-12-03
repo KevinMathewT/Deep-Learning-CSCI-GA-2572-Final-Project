@@ -4,6 +4,7 @@ import seaborn as sns
 import numpy as np
 import wandb
 import glob
+import os
 
 
 def seed_everything(seed=42):
@@ -16,10 +17,17 @@ def seed_everything(seed=42):
     torch.cuda.manual_seed_all(seed)
 
 
-def log_files_by_extensions(extensions):
+def log_files_by_extensions(extensions, max_depth=3):
     files_to_log = []
-    for ext in extensions:
-        files_to_log.extend(glob.glob(f"**/*{ext}", recursive=True))
+    base_depth = os.getcwd().count(os.sep)
+    for root, dirs, files in os.walk('.', topdown=True):
+        dirs[:] = [d for d in dirs if not os.path.islink(os.path.join(root, d))]  # Ignore symbolic links
+        depth = root.count(os.sep) - base_depth
+        if depth > max_depth:
+            continue
+        for file in files:
+            if any(file.endswith(ext) for ext in extensions):
+                files_to_log.append(os.path.join(root, file))
     return files_to_log
 
 
