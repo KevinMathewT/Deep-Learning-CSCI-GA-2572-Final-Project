@@ -61,6 +61,7 @@ def train_jepa(config):
 
     files = log_files()
     for f in files:
+        print(f"Logging file: {f}")
         wandb.save(f)
 
     print('WandB logging complete.')
