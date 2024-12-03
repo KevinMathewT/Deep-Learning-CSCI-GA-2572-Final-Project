@@ -9,5 +9,5 @@ data_path: '/scratch/DL24FA/train'
 
 vicreg_loss:
   lambda_invariance: 1.0
-  mu_variance: 100.0
+  mu_variance: 75.0
   nu_covariance: 25.0
