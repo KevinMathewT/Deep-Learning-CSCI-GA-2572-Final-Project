@@ -23,12 +23,13 @@ def log_files():
     collected_files = []
 
     for extension, max_depth in extension_depth_pairs:
-        for root, _, files in os.walk("."):
+        for root, dirs, files in os.walk("."):
             # Calculate the current depth relative to the starting directory
             current_depth = root.count(os.sep) - os.getcwd().count(os.sep)
 
             # Skip directories that exceed the max depth
             if current_depth >= max_depth:
+                dirs[:] = []  # Prune traversal by clearing 'dirs'
                 continue
 
             # Collect files matching the extension
