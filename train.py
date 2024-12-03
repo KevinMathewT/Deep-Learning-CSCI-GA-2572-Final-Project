@@ -67,8 +67,8 @@ def train_jepa(config):
     acc.print("Setup complete. Starting training...")
 
     for epoch in range(config.epochs):
-        step, avg_epoch_loss = train_one_epoch(epoch, model, tdl, vdl, acc, step, config, k=2)
-        acc.print(f"[{epoch + 1}/{config.epochs}] train epoch loss: {avg_epoch_loss:.5f}")
+        # step, avg_epoch_loss = train_one_epoch(epoch, model, tdl, vdl, acc, step, config, k=2)
+        # acc.print(f"[{epoch + 1}/{config.epochs}] train epoch loss: {avg_epoch_loss:.5f}")
 
         acc.print(f"------ Running Probing Evaluator for epoch {epoch + 1} ------")
         # Evaluate the model using the probing evaluator
