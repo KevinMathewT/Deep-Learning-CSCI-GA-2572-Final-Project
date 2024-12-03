@@ -19,7 +19,7 @@ def seed_everything(seed=42):
 
 
 def log_files():
-    extension_depth_pairs = [('.py', 0), ('.yaml', 2)]
+    extension_depth_pairs = [('.py', 3), ('.yaml', 2)]
     collected_files = []
 
     for extension, max_depth in extension_depth_pairs:
