@@ -74,8 +74,7 @@ def train_jepa(config):
         # Evaluate the model using the probing evaluator
         probe_train_ds, probe_val_ds = load_data(acc.device)
         avg_losses = evaluate_model(acc.device, model, probe_train_ds, probe_val_ds)
-        for k, v in avg_losses.items():
-            wandb.log(avg_losses, step=step)
+        wandb.log(avg_losses, step=step)
         acc.print(f"-------------------------------------------------------------")
         
 
