@@ -120,6 +120,11 @@ class ConfigBase:
         with open(path, "w") as f:
             OmegaConf.save(config=self, f=f)
 
+@dataclass
+class VicRegConfig:
+    lambda_invariance: float = 25.0
+    mu_variance: float = 25.0
+    nu_covariance: float = 1.0
 
 # New JEPAConfig class
 @dataclass
@@ -132,4 +137,5 @@ class JEPAConfig(ConfigBase):
     learning_rate: float = 0.001
     model_type: str = 'JEPA'
     data_path: str = '/scratch/DL24FA/train'
+    vicreg_loss: VicRegConfig = VicRegConfig()
     # You can add more configuration parameters as needed

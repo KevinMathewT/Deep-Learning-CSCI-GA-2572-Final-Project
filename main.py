@@ -42,12 +42,17 @@ def load_data(device):
 
 
 def load_model():
-    """Load or initialize the model."""
-    # TODO: Replace MockModel with your trained model
-    # model = MockModel()
-    config = JEPAConfig.parse_from_file(args.config)
-    model = JEPA()
+    from configs import JEPAConfig
+    from models import JEPA
+    
+    """Load or initialize the JEPA model."""
+    # Parse config file
+    config_path = "config/jepa_config.yaml"  # Update if the path differs
+    config = JEPAConfig.parse_from_file(config_path)
+    # Initialize JEPA model
+    model = JEPA(config)
     return model
+
 
 
 def evaluate_model(device, model, probe_train_ds, probe_val_ds):

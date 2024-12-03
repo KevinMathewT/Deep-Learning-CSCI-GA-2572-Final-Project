@@ -92,12 +92,13 @@ class Encoder(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
+        self.repr_dim = config.embed_dim
         self.conv = nn.Sequential(
             nn.Conv2d(config.in_c, 32, kernel_size=3, stride=2, padding=1),  # Conv2d layer
             nn.ReLU(),
         )
         self.flatten = nn.Flatten()
-        self.fc = nn.Linear(32 * 33 * 33, config.embed_dim)  # Fully connected layer
+        self.fc = nn.Linear(32 * 33 * 33, self.repr_dim)  # Fully connected layer
     
     def forward(self, x):
         # x: (B*T, C, H, W) = (B*T, 2, 65, 65)
@@ -111,26 +112,27 @@ class Predictor(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
-        self.action_proj = nn.Linear(config.action_dim, config.embed_dim)  # Project action to embed_dim
+        self.repr_dim = config.embed_dim
+        self.action_proj = nn.Linear(config.action_dim, self.repr_dim)  # Project action to repr_dim
         # Optionally, you can add a projection for the state embedding
-        # self.state_proj = nn.Linear(config.embed_dim, config.embed_dim)
+        # self.state_proj = nn.Linear(self.repr_dim, self.repr_dim)
         # For simplicity, we'll assume identity for state embedding
 
         self.fc = nn.Sequential(
             nn.ReLU(),
-            nn.Linear(config.embed_dim, config.embed_dim),  # Further processing
+            nn.Linear(self.repr_dim, self.repr_dim),  # Further processing
         )
         
     def forward(self, s_embed, a):
-        # s_embed: (B*(T-1), embed_dim)
+        # s_embed: (B*(T-1), repr_dim)
         # a: (B*(T-1), action_dim)
-        a_proj = self.action_proj(a)  # (B*(T-1), embed_dim)
+        a_proj = self.action_proj(a)  # (B*(T-1), repr_dim)
         # s_proj = self.state_proj(s_embed)  # If projecting s_embed
         s_proj = s_embed  # If not projecting s_embed
 
-        x = s_proj + a_proj  # Element-wise addition: (B*(T-1), embed_dim)
-        x = self.fc(x)  # Further processing: (B*(T-1), embed_dim)
-        return x  # (B*(T-1), embed_dim)
+        x = s_proj + a_proj  # Element-wise addition: (B*(T-1), repr_dim)
+        x = self.fc(x)  # Further processing: (B*(T-1), repr_dim)
+        return x  # (B*(T-1), repr_dim)
 
 
 
@@ -143,6 +145,7 @@ class JEPA(BaseModel):
         self.optimizer = torch.optim.Adam(self.parameters(), lr=config.learning_rate)
 
         self.config = config
+        self.repr_dim = config.embed_dim
 
     def forward(self, s, a):
         B, T, C, H, W = s.shape  # s: (B, T, C, H, W)
@@ -341,6 +344,9 @@ class AdversarialJEPA(BaseModel):
         self.pred_opt = torch.optim.Adam(self.pred.parameters(), lr=config.learning_rate)
         self.disc_opt = torch.optim.Adam(self.disc.parameters(), lr=config.learning_rate)
 
+        self.config = config
+        self.repr_dim = config.embed_dim
+
     def forward(self, s, a):
         B, T, C, H, W = s.shape
         s = s.view(B * T, C, H, W)  # (B*T, C, H, W)
@@ -458,6 +464,9 @@ class InfoMaxJEPA(BaseModel):
         self.enc = Encoder(config)
         self.pred = Predictor(config)
         self.optimizer = torch.optim.Adam(self.parameters(), lr=config.learning_rate)
+
+        self.config = config
+        self.repr_dim = config.embed_dim
 
     def forward(self, s, a):
         B, T, C, H, W = s.shape  # s: (B, T, C, H, W)
