@@ -60,6 +60,7 @@ def train_jepa(config):
     acc.save_state(f"weights/{config.model_type}_model_weights")
     wandb.finish()
 
+# python -m train --config config/jepa_config.yaml
 def main():
     parser = argparse.ArgumentParser(description='Train different models.')
     parser.add_argument('--model', type=str, default='JEPA', help='Model type: JEPA, AdversarialJEPA, InfoMaxJEPA')

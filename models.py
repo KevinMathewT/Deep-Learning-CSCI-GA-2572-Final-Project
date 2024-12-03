@@ -133,6 +133,7 @@ class Predictor(nn.Module):
         return x  # (B*(T-1), embed_dim)
 
 
+
 # JEPA model adjusted to accept config
 class JEPA(BaseModel):
     def __init__(self, config):
@@ -140,6 +141,8 @@ class JEPA(BaseModel):
         self.enc = Encoder(config)
         self.pred = Predictor(config)
         self.optimizer = torch.optim.Adam(self.parameters(), lr=config.learning_rate)
+
+        self.config = config
 
     def forward(self, s, a):
         B, T, C, H, W = s.shape  # s: (B, T, C, H, W)
@@ -165,22 +168,25 @@ class JEPA(BaseModel):
         loss = F.mse_loss(preds[:, 1:], enc_s[:, 1:])  # Compute MSE loss for timesteps 1 to T-1
         return loss
 
-    def compute_vicreg_loss(self, preds, enc_s, lambda_invariance=1.0, mu_variance=100.0, nu_covariance=25.0, gamma=1.0, epsilon=1e-4):
+    def compute_vicreg_loss(self, preds, enc_s, gamma=1.0, epsilon=1e-4):
         """
         Compute VICReg loss with invariance, variance, and covariance terms.
         
         Args:
             preds: Predicted embeddings from the predictor. Shape (B, T, embed_dim).
             enc_s: Target embeddings from the encoder. Shape (B, T, embed_dim).
-            lambda_invariance: Weight for invariance term.
-            mu_variance: Weight for variance term.
-            nu_covariance: Weight for covariance term.
             gamma: Target standard deviation for variance term.
             epsilon: Small value to avoid numerical instability.
             
         Returns:
             vicreg_loss: The combined VICReg loss.
         """
+
+        # taking from config
+        lambda_invariance = self.config.vicreg_loss.lambda_invariance
+        mu_variance = self.config.vicreg_loss.mu_variance
+        nu_covariance = self.config.vicreg_loss.nu_covariance
+        
         preds, enc_s = preds[:, 1:], enc_s[:, 1:]
 
         # Flatten temporal dimensions for batch processing
