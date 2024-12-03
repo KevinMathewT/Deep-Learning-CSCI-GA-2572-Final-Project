@@ -48,8 +48,9 @@ def train_jepa(config):
     config_dict = asdict(config)
 
     # Initialize wandb with the configuration
-    wandb.init(project="DL Final Project", config=config_dict)
-
+    wandb.init(project="DL Final Project", config=config_dict, settings=wandb.Settings(code_dir="."))
+    wandb.run.log_code(".")
+    
     acc, model, tdl, vdl = setup(config)
     step = 0  # Initialize step counter locally
 
