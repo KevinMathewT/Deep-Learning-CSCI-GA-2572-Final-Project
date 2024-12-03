@@ -76,6 +76,7 @@ def train_jepa(config):
         avg_losses = evaluate_model(acc.device, model, probe_train_ds, probe_val_ds)
         avg_losses['step'] = step
         wandb.log(avg_losses, step=step)
+        step += 1
         acc.print(f"-------------------------------------------------------------")
         
 
