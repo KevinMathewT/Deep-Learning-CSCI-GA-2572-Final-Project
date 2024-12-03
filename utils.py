@@ -5,6 +5,7 @@ import numpy as np
 import wandb
 import glob
 import os
+from pathspec import PathSpec
 
 
 def seed_everything(seed=42):
@@ -17,18 +18,21 @@ def seed_everything(seed=42):
     torch.cuda.manual_seed_all(seed)
 
 
-def log_files_by_extensions(extensions, max_depth=3):
+def log_files():
+    # Read .gitignore and compile the pathspec
+    with open('.gitignore', 'r') as f:
+        gitignore_patterns = f.read().splitlines()
+    spec = PathSpec.from_lines('gitwildmatch', gitignore_patterns)
+
+    # Collect all files, skipping those ignored
     files_to_log = []
-    base_depth = os.getcwd().count(os.sep)
-    for root, dirs, files in os.walk('.', topdown=True):
-        dirs[:] = [d for d in dirs if not os.path.islink(os.path.join(root, d))]  # Ignore symbolic links
-        depth = root.count(os.sep) - base_depth
-        if depth > max_depth:
-            continue
+    for root, _, files in os.walk("."):
         for file in files:
-            if any(file.endswith(ext) for ext in extensions):
-                files_to_log.append(os.path.join(root, file))
+            file_path = os.path.relpath(os.path.join(root, file))
+            if not spec.match_file(file_path):
+                files_to_log.append(file_path)
     return files_to_log
+
 
 
 def log_embeddings_wandb(epoch, batch_idx, batch_states, batch_actions, enc_embeddings, pred_embeddings, timesteps=[0, 2, 4], phase="train", step=None):

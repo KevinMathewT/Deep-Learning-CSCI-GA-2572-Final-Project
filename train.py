@@ -10,7 +10,7 @@ import numpy as np
 from dataclasses import asdict
 
 from configs import JEPAConfig
-from utils import seed_everything, log_files_by_extensions
+from utils import log_files, seed_everything
 from engine import train_one_epoch, val_one_epoch
 from omegaconf import OmegaConf
 import argparse
@@ -59,7 +59,7 @@ def train_jepa(config):
     print("WandB initialized.")
     print("Logging files to WandB...")
 
-    files = log_files_by_extensions([".py", ".yaml", ".json", ".ipynb", ".md", ".txt", ".sh", ".gitignore", ".lock", ".toml"])
+    files = log_files()
     for f in files:
         wandb.save(f)
 
