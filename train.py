@@ -9,7 +9,7 @@ import numpy as np
 from dataclasses import asdict
 
 from configs import JEPAConfig
-from utils import seed_everything
+from utils import seed_everything, log_files_by_extensions
 from engine import train_one_epoch, val_one_epoch
 from omegaconf import OmegaConf
 import argparse
@@ -48,10 +48,7 @@ def train_jepa(config):
 
     # Initialize wandb with the configuration
     wandb.init(project="DL Final Project", config=config_dict, settings=wandb.Settings(code_dir="."))
-    
-    # Collect only .py and .yaml files
-    files_to_log = glob.glob("**/*.py", recursive=True) + glob.glob("**/*.yaml", recursive=True)
-    for f in files_to_log:
+    for f in log_files_by_extensions([".py", ".yaml", ".json", ".ipynb", ".md", ".txt", ".sh", ".gitignore", ".lock", ".toml"]):
         wandb.save(f)
 
     acc, model, tdl, vdl = setup(config)

@@ -3,6 +3,7 @@ from matplotlib.colors import Normalize
 import seaborn as sns
 import numpy as np
 import wandb
+import glob
 
 
 def seed_everything(seed=42):
@@ -13,6 +14,13 @@ def seed_everything(seed=42):
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
+
+
+def log_files_by_extensions(extensions):
+    files_to_log = []
+    for ext in extensions:
+        files_to_log.extend(glob.glob(f"**/*{ext}", recursive=True))
+    return files_to_log
 
 
 def log_embeddings_wandb(epoch, batch_idx, batch_states, batch_actions, enc_embeddings, pred_embeddings, timesteps=[0, 2, 4], phase="train", step=None):
