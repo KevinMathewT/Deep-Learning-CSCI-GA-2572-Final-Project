@@ -14,6 +14,7 @@ from utils import seed_everything, log_files_by_extensions
 from engine import train_one_epoch, val_one_epoch
 from omegaconf import OmegaConf
 import argparse
+from pprint import pprint
 
 def setup(config):
     acc = Accelerator()
@@ -81,6 +82,10 @@ def main():
 
     config = JEPAConfig.parse_from_file(args.config)
     config.model_type = args.model  # Override model type if specified
+
+    print("------ Configuration Parameters -----")
+    pprint(config)
+    print("-------------------------------------")
 
     seed_everything(42)  # Set the seed for reproducibility
     train_jepa(config)
