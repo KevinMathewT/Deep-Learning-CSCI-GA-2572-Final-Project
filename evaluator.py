@@ -114,7 +114,7 @@ class ProbingEvaluator:
                 # TODO: Forward pass through your model
                 init_states = batch.states[:, 0:1]  # BS, 1, C, H, W
                 pred_encs = model(states=init_states, actions=batch.actions, teacher_forcing=False)
-                print(f"pred_encs shape: {pred_encs.shape}")
+                # print(f"pred_encs shape: {pred_encs.shape}")
                 pred_encs = pred_encs.transpose(0, 1)  # # BS, T, D --> T, BS, D
 
                 # Make sure pred_encs has shape (T, BS, D) at this point
@@ -154,7 +154,7 @@ class ProbingEvaluator:
                     target = sampled_target_locs.cuda()
 
                 pred_locs = torch.stack([prober(x) for x in pred_encs], dim=1)
-                print(f"size: {pred_locs.shape} and {target.shape}")
+                # print(f"size: {pred_locs.shape} and {target.shape}")
                 losses = location_losses(pred_locs, target)
                 per_probe_loss = losses.mean()
 

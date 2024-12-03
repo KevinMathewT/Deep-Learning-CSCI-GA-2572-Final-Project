@@ -51,19 +51,13 @@ def train_jepa(config):
     # Convert the JEPAConfig dataclass to a dictionary
     config_dict = asdict(config)
 
-    print("Initializing WandB...")
-
     # Initialize wandb with the configuration
+    print("Initializing WandB...")
     wandb.init(project="DL Final Project", config=config_dict, settings=wandb.Settings(code_dir="."))
-
     print("WandB initialized.")
     print("Logging files to WandB...")
-
-    files = log_files()
-    for f in files:
-        print(f"Logging file: {f}")
+    for f in log_files():
         wandb.save(f)
-
     print('WandB logging complete.')
 
     acc, model, tdl, vdl = setup(config)

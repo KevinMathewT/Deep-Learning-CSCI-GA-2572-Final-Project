@@ -19,19 +19,22 @@ def seed_everything(seed=42):
 
 
 def log_files():
-    # Read .gitignore and compile the pathspec
-    with open('.gitignore', 'r') as f:
-        gitignore_patterns = f.read().splitlines()
-    spec = PathSpec.from_lines('gitwildmatch', gitignore_patterns)
+    extension_depth_pairs = [('.py', 0), ('.yaml', 2)]
+    collected_files = []
 
-    # Collect all files, skipping those ignored
-    files_to_log = []
-    for root, _, files in os.walk("."):
-        for file in files:
-            file_path = os.path.relpath(os.path.join(root, file))
-            if not spec.match_file(file_path):
-                files_to_log.append(file_path)
-    return files_to_log
+    for extension, max_depth in extension_depth_pairs:
+        for root, _, files in os.walk("."):
+            # Calculate the current depth
+            current_depth = root.count(os.sep) - os.getcwd().count(os.sep)
+
+            if max_depth > 0 and current_depth >= max_depth:
+                continue
+
+            for file in files:
+                if file.endswith(extension):
+                    collected_files.append(os.path.relpath(os.path.join(root, file)))
+
+    return collected_files
 
 
 
