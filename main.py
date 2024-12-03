@@ -44,6 +44,7 @@ def load_data(device):
 def load_model():
     from configs import JEPAConfig
     from models import JEPA
+    
     """Load or initialize the JEPA model."""
     # Parse config file
     config_path = "config/jepa_config.yaml"  # Update if the path differs
@@ -69,6 +70,8 @@ def evaluate_model(device, model, probe_train_ds, probe_val_ds):
 
     for probe_attr, loss in avg_losses.items():
         print(f"{probe_attr} loss: {loss}")
+
+    return avg_losses
 
 
 if __name__ == "__main__":
