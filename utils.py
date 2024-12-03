@@ -22,15 +22,19 @@ def log_files():
     extension_depth_pairs = [('.py', 2), ('.yaml', 2)]
     collected_files = []
 
+    base_dir = os.path.abspath(".")
+    base_depth = base_dir.count(os.sep)
+
     for extension, max_depth in extension_depth_pairs:
         for root, dirs, files in os.walk("."):
-            # Calculate the current depth relative to the starting directory
-            current_depth = root.count(os.sep) - os.getcwd().count(os.sep)
+            # Get absolute path of the current directory
+            root_abs = os.path.abspath(root)
+            current_depth = root_abs.count(os.sep) - base_depth
 
             # Skip directories that exceed the max depth
             if current_depth >= max_depth:
                 dirs[:] = []  # Prune traversal by clearing 'dirs'
-                continue
+                continue  # Skip processing files in this directory
 
             # Collect files matching the extension
             for file in files:
