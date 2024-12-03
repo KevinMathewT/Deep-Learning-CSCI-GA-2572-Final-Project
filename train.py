@@ -55,10 +55,14 @@ def train_jepa(config):
 
     # Initialize wandb with the configuration
     wandb.init(project="DL Final Project", config=config_dict, settings=wandb.Settings(code_dir="."))
+
+    print("WandB initialized.")
+    print("Logging files to WandB...")
+
     for f in log_files_by_extensions([".py", ".yaml", ".json", ".ipynb", ".md", ".txt", ".sh", ".gitignore", ".lock", ".toml"]):
         wandb.save(f)
 
-    print('WandB initialized.')
+    print('WandB logging complete.')
 
     acc, model, tdl, vdl = setup(config)
     step = 0  # Initialize step counter locally
