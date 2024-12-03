@@ -3,6 +3,7 @@ import wandb
 from accelerate import Accelerator
 import torch
 from dataset import WallDataset
+from main import evaluate_model, load_data
 from models import get_model
 from tqdm import tqdm
 import numpy as np
@@ -34,6 +35,9 @@ def setup(config):
         val_dataset, batch_size=config.batch_size, shuffle=False, drop_last=False, pin_memory=False
     )
 
+    # Calculate steps_per_epoch
+    config.steps_per_epoch = len(tdl)
+
     # Get the model class from the model name
     ModelClass = get_model(config.model_type)
     model = ModelClass(config).to(device)
@@ -57,6 +61,13 @@ def train_jepa(config):
     for epoch in range(config.epochs):
         step, avg_epoch_loss = train_one_epoch(epoch, model, tdl, vdl, acc, step, config, k=2)
         acc.print(f"[{epoch + 1}/{config.epochs}] train epoch loss: {avg_epoch_loss:.5f}")
+
+        acc.print(f"------ Running Probing Evaluator for epoch {epoch + 1} ------")
+        # Evaluate the model using the probing evaluator
+        probe_train_ds, probe_val_ds = load_data(acc.device)
+        evaluate_model(acc.device, model, probe_train_ds, probe_val_ds)
+        acc.print(f"-------------------------------------------------------------")
+        
 
     acc.save_state(f"weights/{config.model_type}_model_weights")
     wandb.finish()

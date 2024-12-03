@@ -3,6 +3,7 @@ import numpy as np
 from torch import nn
 from torch.nn import functional as F
 import torch
+from torch.optim.lr_scheduler import OneCycleLR
 
 from configs import JEPAConfig
 
@@ -143,6 +144,14 @@ class JEPA(BaseModel):
         self.enc = Encoder(config)
         self.pred = Predictor(config)
         self.optimizer = torch.optim.Adam(self.parameters(), lr=config.learning_rate)
+        self.scheduler = OneCycleLR(
+            self.optimizer, 
+            max_lr=config.learning_rate, 
+            steps_per_epoch=config.steps_per_epoch, 
+            epochs=config.epochs,
+            pct_start=0.05,
+            anneal_strategy='cos',
+        )
 
         self.config = config
         self.repr_dim = config.embed_dim
@@ -252,6 +261,8 @@ class JEPA(BaseModel):
         grad_norm = grad_norm ** 0.5
 
         self.optimizer.step()
+        self.scheduler.step()  # Step the scheduler
+
         learning_rate = self.optimizer.param_groups[0]['lr']
 
         # Compute the absolute value of the action weights
@@ -343,6 +354,8 @@ class AdversarialJEPA(BaseModel):
         self.enc_opt = torch.optim.Adam(self.enc.parameters(), lr=config.learning_rate)
         self.pred_opt = torch.optim.Adam(self.pred.parameters(), lr=config.learning_rate)
         self.disc_opt = torch.optim.Adam(self.disc.parameters(), lr=config.learning_rate)
+        
+        self.scheduler = OneCycleLR(self.enc_opt, max_lr=config.learning_rate, steps_per_epoch=config.steps_per_epoch, epochs=config.epochs)
 
         self.config = config
         self.repr_dim = config.embed_dim
@@ -413,6 +426,7 @@ class AdversarialJEPA(BaseModel):
 
         self.enc_opt.step()
         self.pred_opt.step()
+        self.scheduler.step()  # Step the scheduler
 
         learning_rate = self.enc_opt.param_groups[0]['lr']  # Assuming same LR for all optimizers
 
@@ -465,6 +479,8 @@ class InfoMaxJEPA(BaseModel):
         self.pred = Predictor(config)
         self.optimizer = torch.optim.Adam(self.parameters(), lr=config.learning_rate)
 
+        self.scheduler = OneCycleLR(self.optimizer, max_lr=config.learning_rate, steps_per_epoch=config.steps_per_epoch, epochs=config.epochs)
+        
         self.config = config
         self.repr_dim = config.embed_dim
 
@@ -512,6 +528,8 @@ class InfoMaxJEPA(BaseModel):
         grad_norm = grad_norm ** 0.5
 
         self.optimizer.step()
+        self.scheduler.step()  # Step the scheduler
+
         learning_rate = self.optimizer.param_groups[0]['lr']
 
         # Prepare the output dictionary

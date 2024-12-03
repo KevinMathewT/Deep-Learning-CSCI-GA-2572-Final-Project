@@ -44,7 +44,6 @@ def load_data(device):
 def load_model():
     from configs import JEPAConfig
     from models import JEPA
-    
     """Load or initialize the JEPA model."""
     # Parse config file
     config_path = "config/jepa_config.yaml"  # Update if the path differs
