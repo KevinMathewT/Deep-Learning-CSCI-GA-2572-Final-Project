@@ -24,18 +24,19 @@ def log_files():
 
     for extension, max_depth in extension_depth_pairs:
         for root, _, files in os.walk("."):
-            # Calculate the current depth
+            # Calculate the current depth relative to the starting directory
             current_depth = root.count(os.sep) - os.getcwd().count(os.sep)
 
-            if max_depth > 0 and current_depth >= max_depth:
+            # Skip directories that exceed the max depth
+            if current_depth >= max_depth:
                 continue
 
+            # Collect files matching the extension
             for file in files:
                 if file.endswith(extension):
                     collected_files.append(os.path.relpath(os.path.join(root, file)))
 
     return collected_files
-
 
 
 def log_embeddings_wandb(epoch, batch_idx, batch_states, batch_actions, enc_embeddings, pred_embeddings, timesteps=[0, 2, 4], phase="train", step=None):
