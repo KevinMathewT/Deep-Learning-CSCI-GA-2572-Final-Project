@@ -157,7 +157,8 @@ class JEPA(BaseModel):
         self.repr_dim = config.embed_dim
 
     def forward(self, states, actions, teacher_forcing=True):
-        B, T, C, H, W = states.shape  # states: (B, T, C, H, W)
+        B, _, C, H, W = states.shape  # states: (B, T, C, H, W)
+        T = actions.shape[1] + 1  # Number of timesteps | actions: (B, T-1, action_dim)
             
         if teacher_forcing:
             states = states.view(B * T, C, H, W)  # Reshape to (B*T, C, H, W)
