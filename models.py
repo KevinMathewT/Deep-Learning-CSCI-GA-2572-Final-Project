@@ -518,17 +518,21 @@ class AdversarialJEPAWithRegularization(BaseModel):
 
             return preds
         
+
     def compute_regularization_loss(self, states_embed, pred_states, actions):
         """
         Computes the regularization loss based on the embedding difference and actions.
         """
-        # Predict actions from embedding differences
-        predicted_actions = self.action_reg_net(
-            states_embed, pred_states
-        )  # (B*(T-1), action_dim)
+        # Calculate embedding differences
+        embedding_diff = (
+            pred_states - states_embed
+        )  # Difference between input and output of predictor
         actions = actions.view(
             -1, self.config.action_dim
         )  # Flatten actions to (B*(T-1), action_dim)
+
+        # Predict actions from embedding differences
+        predicted_actions = self.action_reg_net(embedding_diff)  # (B*(T-1), action_dim)
 
         # Compute MSE loss between predicted and actual actions
         reg_loss = F.mse_loss(predicted_actions, actions)
@@ -600,24 +604,43 @@ class AdversarialJEPAWithRegularization(BaseModel):
 
         return vicreg_loss, invariance_loss, variance_loss, covariance_loss
 
-    def compute_generative_losses(self, preds, enc_s):
+    def compute_discriminator_loss(self, preds, enc_s):
+        """
+        Computes the discriminator loss using real and fake embeddings.
+        """
+        # Extract embeddings
         real_embeddings = enc_s[:, 1:].reshape(-1, self.config.embed_dim)
         fake_embeddings = preds[:, 1:].detach().reshape(-1, self.config.embed_dim)
 
-        real_labels, fake_labels = torch.ones(
+        # Create labels
+        real_labels = torch.ones(
             real_embeddings.size(0), 1, device=real_embeddings.device
-        ), torch.zeros(fake_embeddings.size(0), 1, device=fake_embeddings.device)
+        )
+        fake_labels = torch.zeros(
+            fake_embeddings.size(0), 1, device=fake_embeddings.device
+        )
 
-        real_predictions, fake_predictions = self.disc(real_embeddings), self.disc(fake_embeddings)
-        disc_loss_real, disc_loss_fake = F.binary_cross_entropy(
-            real_predictions, real_labels
-        ), F.binary_cross_entropy(fake_predictions, fake_labels)
+        # Discriminator predictions
+        real_predictions = self.disc(real_embeddings)
+        fake_predictions = self.disc(fake_embeddings)
+
+        # Compute binary cross-entropy losses
+        disc_loss_real = F.binary_cross_entropy(real_predictions, real_labels)
+        disc_loss_fake = F.binary_cross_entropy(fake_predictions, fake_labels)
+
+        # Average the losses
         disc_loss = (disc_loss_real + disc_loss_fake) / 2
-
+        return disc_loss
+    
+    def compute_generator_loss(self, preds):
+        fake_embeddings = preds[:, 1:].detach().reshape(-1, self.config.embed_dim)
+        real_labels = torch.ones(
+            fake_embeddings.size(0), 1, device=fake_embeddings.device
+        )
         gen_predictions = self.disc(preds[:, 1:].reshape(-1, self.config.embed_dim))
         gen_loss = F.binary_cross_entropy(gen_predictions, real_labels)
 
-        return disc_loss, gen_loss
+        return gen_loss
 
     def training_step(self, batch, device):
         states, actions = batch.states.to(device, non_blocking=True), batch.actions.to(
@@ -626,7 +649,14 @@ class AdversarialJEPAWithRegularization(BaseModel):
 
         preds, enc_s = self.forward(states, actions)
 
-        disc_loss, gen_loss = self.compute_generative_losses(preds, enc_s)
+        # Step 1: Train the discriminator
+        disc_loss = self.compute_discriminator_loss(enc_s, preds)
+        self.disc_opt.zero_grad()
+        disc_loss.backward()
+        self.disc_opt.step()
+
+        # Step 2: Train the generator
+        gen_loss = self.compute_generator_loss(preds)
         reg_loss = self.compute_regularization_loss(
             enc_s[:, :-1].reshape(-1, self.config.embed_dim),
             preds[:, 1:].reshape(-1, self.config.embed_dim),
@@ -634,20 +664,19 @@ class AdversarialJEPAWithRegularization(BaseModel):
         )
         vicreg_loss, invariance_loss, variance_loss, covariance_loss = (
             self.compute_vicreg_loss(preds, enc_s)
-        )  # VICReg Loss Calculation
+        )
 
-        total_loss = (self.config.delta_gen * gen_loss) \
-            + (self.config.lambda_reg * reg_loss) + \
-            vicreg_loss
-
-        self.disc_opt.zero_grad()
-        disc_loss.backward()
-        self.disc_opt.step()
+        total_loss = (
+            self.config.delta_gen * gen_loss
+            + self.config.lambda_reg * reg_loss
+            + vicreg_loss
+        )
 
         self.gen_opt.zero_grad()
         total_loss.backward()
         self.gen_opt.step()
 
+        # Update learning rate schedulers
         self.gen_sched.step()
         self.disc_sched.step()
         
@@ -691,10 +720,47 @@ class AdversarialJEPAWithRegularization(BaseModel):
         }
 
     def validation_step(self, batch):
-        s, a = batch.states, batch.actions
-        p, es = self.forward(s, a)
-        _, total_loss = self.compute_losses(p, es, a)
-        return {"loss": total_loss.item()}
+        states, actions = batch.states, batch.actions
+        preds, enc_s = self.forward(states, actions)
+        loss = self.compute_loss(preds, enc_s)
+        learning_rate = self.optimizer.param_groups[0]["lr"]
+
+        # Compute the absolute value of the action weights
+        action_weight = (
+            self.pred.action_proj.weight
+        )  # Get weights from the action projection layer
+        action_weight_abs = (
+            action_weight.abs().mean().item()
+        )  # Compute the mean absolute value
+
+        # Compute deviation from identity for fc layer
+        fc_weight = self.pred.fc[
+            1
+        ].weight  # Get the weights of the Linear layer inside fc
+        identity_matrix = torch.eye(fc_weight.size(0), fc_weight.size(1)).to(
+            fc_weight.device
+        )
+        deviation_from_identity = torch.norm(
+            fc_weight - identity_matrix, p="fro"
+        ) / torch.norm(identity_matrix, p="fro")
+
+        # Prepare the output dictionary
+        output = {
+            "loss": loss.item(),
+            "learning_rate": learning_rate,
+            "action_weight_abs": action_weight_abs,
+            "deviation_from_identity_pred_final_proj": deviation_from_identity.item(),  # Log the deviation
+        }
+
+        # Non-loggable data
+        output["non_logs"] = {
+            "states": states.detach(),
+            "actions": actions.detach(),
+            "enc_embeddings": enc_s.detach(),
+            "pred_embeddings": preds.detach(),
+        }
+
+        return output
 
 
 class AdversarialJEPA(BaseModel):
