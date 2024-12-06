@@ -1350,6 +1350,7 @@ MODEL_MAP: Dict[str, BaseModel] = {
     "AdversarialJEPA": AdversarialJEPA,
     "InfoMaxJEPA": InfoMaxJEPA,
     "ActionRegularizationJEPA": ActionRegularizationJEPA,
+    "AdversarialJEPAWithRegularization": AdversarialJEPAWithRegularization,
     # Add more models here as needed
 }
 
