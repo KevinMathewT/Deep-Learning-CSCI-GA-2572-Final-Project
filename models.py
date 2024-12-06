@@ -523,21 +523,18 @@ class AdversarialJEPAWithRegularization(BaseModel):
         """
         Computes the regularization loss based on the embedding difference and actions.
         """
-        # Calculate embedding differences
-        embedding_diff = (
-            pred_states - states_embed
-        )  # Difference between input and output of predictor
+        # Predict actions from embedding differences
+        predicted_actions = self.action_reg_net(
+            states_embed, pred_states
+        )  # (B*(T-1), action_dim)
         actions = actions.view(
             -1, self.config.action_dim
         )  # Flatten actions to (B*(T-1), action_dim)
 
-        # Predict actions from embedding differences
-        predicted_actions = self.action_reg_net(embedding_diff)  # (B*(T-1), action_dim)
-
         # Compute MSE loss between predicted and actual actions
         reg_loss = F.mse_loss(predicted_actions, actions)
         return reg_loss
-
+    
     def compute_vicreg_loss(self, preds, enc_s, gamma=1.0, epsilon=1e-4):
         """
         Compute VICReg loss with invariance, variance, and covariance terms.
