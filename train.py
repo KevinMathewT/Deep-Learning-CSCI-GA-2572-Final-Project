@@ -38,10 +38,10 @@ def setup(config):
 
     # Create train and validation data loaders
     tdl = torch.utils.data.DataLoader(
-        train_dataset, batch_size=config.batch_size, shuffle=True, drop_last=True, pin_memory=False, num_workers=24,
+        train_dataset, batch_size=config.batch_size, shuffle=True, drop_last=True, pin_memory=False, num_workers=4,
     )
     vdl = torch.utils.data.DataLoader(
-        val_dataset, batch_size=config.batch_size, shuffle=False, drop_last=False, pin_memory=False, num_workers=24,
+        val_dataset, batch_size=config.batch_size, shuffle=False, drop_last=False, pin_memory=False, num_workers=4,
     )
 
     # Calculate steps_per_epoch
