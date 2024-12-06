@@ -212,7 +212,7 @@ class JEPA(BaseModel):
 
             return preds
 
-    def compute_loss(self, preds, enc_s):
+    def compute_mse_loss(self, preds, enc_s):
         # preds, enc_s: (B, T, embed_dim)
         loss = F.mse_loss(
             preds[:, 1:], enc_s[:, 1:]
@@ -291,7 +291,7 @@ class JEPA(BaseModel):
         )
         preds, enc_s = self.forward(states, actions)
 
-        # loss = self.compute_loss(preds, enc_s) # Normal Loss Calculation
+        # loss = self.compute_mse_loss(preds, enc_s) # Normal Loss Calculation
         loss, invariance_loss, variance_loss, covariance_loss = (
             self.compute_vicreg_loss(preds, enc_s)
         )  # VICReg Loss Calculation
@@ -357,7 +357,7 @@ class JEPA(BaseModel):
     def validation_step(self, batch):
         states, actions = batch.states, batch.actions
         preds, enc_s = self.forward(states, actions)
-        loss = self.compute_loss(preds, enc_s)
+        loss = self.compute_mse_loss(preds, enc_s)
         learning_rate = self.optimizer.param_groups[0]["lr"]
 
         # Compute the absolute value of the action weights
@@ -518,6 +518,13 @@ class AdversarialJEPAWithRegularization(BaseModel):
 
             return preds
         
+    
+    def compute_mse_loss(self, preds, enc_s):
+        # preds, enc_s: (B, T, embed_dim)
+        loss = F.mse_loss(
+            preds[:, 1:], enc_s[:, 1:]
+        )  # Compute MSE loss for timesteps 1 to T-1
+        return loss
 
     def compute_regularization_loss(self, states_embed, pred_states, actions):
         """
@@ -730,7 +737,7 @@ class AdversarialJEPAWithRegularization(BaseModel):
     def validation_step(self, batch):
         states, actions = batch.states, batch.actions
         preds, enc_s = self.forward(states, actions)
-        loss = self.compute_loss(preds, enc_s)
+        loss = self.compute_mse_loss(preds, enc_s)
         learning_rate = self.optimizer.param_groups[0]["lr"]
 
         # Compute the absolute value of the action weights
@@ -847,7 +854,7 @@ class AdversarialJEPA(BaseModel):
 
             return preds
 
-    def compute_losses(self, preds, enc_s):
+    def compute_mse_losses(self, preds, enc_s):
         real_embeds = enc_s[:, 1:].reshape(
             -1, self.config.embed_dim
         )  # (B*(T-1), embed_dim)
@@ -893,7 +900,7 @@ class AdversarialJEPA(BaseModel):
         preds, enc_s = self.forward(states, actions)
 
         # Update Discriminator
-        disc_loss, total_loss = self.compute_losses(preds, enc_s)
+        disc_loss, total_loss = self.compute_mse_losses(preds, enc_s)
         self.disc_opt.zero_grad()
         disc_loss.backward(retain_graph=True)
         self.disc_opt.step()
@@ -965,7 +972,7 @@ class AdversarialJEPA(BaseModel):
     def validation_step(self, batch):
         states, actions = batch.states, batch.actions
         preds, enc_s = self.forward(states, actions)
-        loss = self.compute_loss(preds, enc_s)
+        loss = self.compute_mse_loss(preds, enc_s)
         learning_rate = self.optimizer.param_groups[0]["lr"]
 
         # Compute the absolute value of the action weights
@@ -1041,7 +1048,7 @@ class InfoMaxJEPA(BaseModel):
         )  # (B, T-1, embed_dim)
         return pred_states, enc_s[:, 1:, :]  # Return predictions and targets
 
-    def compute_loss(self, preds, targets):
+    def compute_mse_loss(self, preds, targets):
         B, T_minus_1, D = preds.shape  # preds: (B, T-1, embed_dim)
         preds = preds.reshape(B * T_minus_1, D)  # (B*(T-1), embed_dim)
         targets = targets.reshape(B * T_minus_1, D)  # (B*(T-1), embed_dim)
@@ -1063,7 +1070,7 @@ class InfoMaxJEPA(BaseModel):
             device, non_blocking=True
         )
         preds, targets = self.forward(states, actions)
-        loss, temperature = self.compute_loss(preds, targets)
+        loss, temperature = self.compute_mse_loss(preds, targets)
         self.optimizer.zero_grad()
         loss.backward()
 
@@ -1101,7 +1108,7 @@ class InfoMaxJEPA(BaseModel):
     def validation_step(self, batch):
         states, actions = batch.states, batch.actions
         preds, targets = self.forward(states, actions)
-        loss, temperature = self.compute_loss(preds, targets)
+        loss, temperature = self.compute_mse_loss(preds, targets)
         learning_rate = self.optimizer.param_groups[0]["lr"]
 
         # Prepare the output dictionary
@@ -1196,7 +1203,7 @@ class ActionRegularizationJEPA(BaseModel):
 
             return preds
 
-    def compute_loss(self, preds, enc_s):
+    def compute_mse_loss(self, preds, enc_s):
         # preds, enc_s: (B, T, embed_dim)
         loss = F.mse_loss(
             preds[:, 1:], enc_s[:, 1:]
@@ -1294,7 +1301,7 @@ class ActionRegularizationJEPA(BaseModel):
         )
         preds, enc_s = self.forward(states, actions)
 
-        # loss = self.compute_loss(preds, enc_s) # Normal Loss Calculation
+        # loss = self.compute_mse_loss(preds, enc_s) # Normal Loss Calculation
 
         # Compute regularization loss
         states_embed = enc_s[:, :-1, :].reshape(
@@ -1377,7 +1384,7 @@ class ActionRegularizationJEPA(BaseModel):
     def validation_step(self, batch):
         states, actions = batch.states, batch.actions
         preds, enc_s = self.forward(states, actions)
-        loss = self.compute_loss(preds, enc_s)
+        loss = self.compute_mse_loss(preds, enc_s)
         learning_rate = self.optimizer.param_groups[0]["lr"]
 
         # Compute the absolute value of the action weights
