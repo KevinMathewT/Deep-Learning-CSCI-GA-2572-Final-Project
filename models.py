@@ -468,6 +468,7 @@ class AdversarialJEPAWithRegularization(BaseModel):
         )
 
         self.config = config
+        self.repr_dim = config.embed_dim
 
     def forward(self, states, actions, teacher_forcing=True):
         B, _, C, H, W = states.shape  # states: (B, T, C, H, W)
