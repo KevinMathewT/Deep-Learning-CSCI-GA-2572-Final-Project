@@ -94,6 +94,7 @@ def train_jepa(config):
 # python -m train --config config/jepa_config.yaml
 # python -m train --config config/adv_jepa_config.yaml
 # python -m train --config config/areg_jepa_config.yaml
+# python -m train --config config/areg_adv_jepa_config.yaml
 def main():
     parser = argparse.ArgumentParser(description='Train different models.')
     parser.add_argument('--config', type=str, help='Path to configuration file')
