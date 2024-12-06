@@ -644,15 +644,16 @@ class AdversarialJEPAWithRegularization(BaseModel):
             device, non_blocking=True
         )
 
-        preds, enc_s = self.forward(states, actions)
-
         # Step 1: Train the discriminator
-        disc_loss = self.compute_discriminator_loss(enc_s, preds)
+        with torch.no_grad():  # Detach generator computations to avoid unnecessary graph retention
+            preds, enc_s = self.forward(states, actions)
+        disc_loss = self.compute_discriminator_loss(preds, enc_s)
         self.disc_opt.zero_grad()
         disc_loss.backward()
         self.disc_opt.step()
 
         # Step 2: Train the generator
+        preds, enc_s = self.forward(states, actions)  # Perform forward pass again
         gen_loss = self.compute_generator_loss(preds)
         reg_loss = self.compute_regularization_loss(
             enc_s[:, :-1].reshape(-1, self.config.embed_dim),
