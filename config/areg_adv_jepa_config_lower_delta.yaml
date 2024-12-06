@@ -12,7 +12,7 @@ action_reg_hidden_dim: 32
 lambda_reg: 1
 
 # adversarial regularization
-delta_gen: 5
+delta_gen: 0.2
 
 vicreg_loss:
   lambda_invariance: 1

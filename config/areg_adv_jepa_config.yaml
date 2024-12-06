@@ -2,8 +2,8 @@ embed_dim: 128
 action_dim: 2
 in_c: 2
 epochs: 20
-batch_size: 1536
-learning_rate: 0.0015
+batch_size: 1024
+learning_rate: 0.001
 model_type: 'AdversarialJEPAWithRegularization'
 data_path: '/scratch/DL24FA/train'
 
