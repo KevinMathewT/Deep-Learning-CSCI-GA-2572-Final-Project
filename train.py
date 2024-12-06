@@ -1,3 +1,4 @@
+import os
 import glob
 import wandb
 from accelerate import Accelerator
@@ -10,30 +11,37 @@ import numpy as np
 from dataclasses import asdict
 
 from configs import JEPAConfig
-from utils import log_files, seed_everything
+from utils import log_files, seed_everything, get_free_gpu
 from engine import train_one_epoch, val_one_epoch
 from omegaconf import OmegaConf
 import argparse
 from pprint import pprint
 
 def setup(config):
+    # Select a free GPU
+    free_gpu = get_free_gpu()
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(free_gpu)
+    print(f"Using GPU {free_gpu}")
+
     acc = Accelerator()
     device = acc.device
 
     data_path = config.data_path
 
     # Load the dataset and split into train and validation datasets
-    full_dataset = WallDataset(data_path, probing=False, device=device)
+    print("Loading dataset into memory...")
+    full_dataset = WallDataset(data_path, probing=False) # , device=device)
+    print("Dataset loaded.")
     train_size = int(0.8 * len(full_dataset))
     val_size = len(full_dataset) - train_size
     train_dataset, val_dataset = torch.utils.data.random_split(full_dataset, [train_size, val_size])
 
     # Create train and validation data loaders
     tdl = torch.utils.data.DataLoader(
-        train_dataset, batch_size=config.batch_size, shuffle=True, drop_last=True, pin_memory=False
+        train_dataset, batch_size=config.batch_size, shuffle=True, drop_last=True, pin_memory=False, num_workers=24,
     )
     vdl = torch.utils.data.DataLoader(
-        val_dataset, batch_size=config.batch_size, shuffle=False, drop_last=False, pin_memory=False
+        val_dataset, batch_size=config.batch_size, shuffle=False, drop_last=False, pin_memory=False, num_workers=24,
     )
 
     # Calculate steps_per_epoch
@@ -70,27 +78,28 @@ def train_jepa(config):
         step, avg_epoch_loss = train_one_epoch(epoch, model, tdl, vdl, acc, step, config, k=2)
         acc.print(f"[{epoch + 1}/{config.epochs}] train epoch loss: {avg_epoch_loss:.5f}")
 
-        acc.print(f"------ Running Probing Evaluator for epoch {epoch + 1} ------")
-        # Evaluate the model using the probing evaluator
-        probe_train_ds, probe_val_ds = load_data(acc.device)
-        avg_losses = evaluate_model(acc.device, model, probe_train_ds, probe_val_ds)
-        wandb.log(avg_losses, step=step)
-        step += 1
-        acc.print(f"-------------------------------------------------------------")
+        if (epoch + 1) % 2 == 0:
+            acc.print(f"------ Running Probing Evaluator for epoch {epoch + 1} ------")
+            # Evaluate the model using the probing evaluator
+            probe_train_ds, probe_val_ds = load_data(acc.device)
+            avg_losses = evaluate_model(acc.device, model, probe_train_ds, probe_val_ds)
+            wandb.log(avg_losses, step=step)
+            step += 1
+            acc.print(f"-------------------------------------------------------------")
         
 
     acc.save_state(f"weights/{config.model_type}_model_weights")
     wandb.finish()
 
 # python -m train --config config/jepa_config.yaml
+# python -m train --config config/adv_jepa_config.yaml
+# python -m train --config config/areg_jepa_config.yaml
 def main():
     parser = argparse.ArgumentParser(description='Train different models.')
-    parser.add_argument('--model', type=str, default='JEPA', help='Model type: JEPA, AdversarialJEPA, InfoMaxJEPA')
-    parser.add_argument('--config', type=str, default='config/jepa_config.yaml', help='Path to configuration file')
+    parser.add_argument('--config', type=str, help='Path to configuration file')
     args = parser.parse_args()
 
     config = JEPAConfig.parse_from_file(args.config)
-    config.model_type = args.model  # Override model type if specified
 
     print("------ Configuration Parameters -----")
     pprint(config)
@@ -100,4 +109,6 @@ def main():
     train_jepa(config)
 
 if __name__ == "__main__":
+    torch.autograd.set_detect_anomaly(True)
+
     main()

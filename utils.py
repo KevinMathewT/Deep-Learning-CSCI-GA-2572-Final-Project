@@ -3,9 +3,11 @@ from matplotlib.colors import Normalize
 import seaborn as sns
 import numpy as np
 import wandb
+import torch
 import glob
 import os
 from pathspec import PathSpec
+import subprocess
 
 
 def seed_everything(seed=42):
@@ -16,6 +18,21 @@ def seed_everything(seed=42):
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
+
+
+def get_free_gpu():
+    try:
+        # Query GPU memory usage using nvidia-smi
+        gpu_memory = subprocess.check_output(
+            "nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits", shell=True
+        )
+        gpu_memory = [int(x) for x in gpu_memory.decode("utf-8").strip().split("\n")]
+        free_gpu = int(max(range(len(gpu_memory)), key=lambda i: gpu_memory[i]))
+        return free_gpu
+    except Exception as e:
+        print("Could not find free GPU automatically:", e)
+        # Fallback to first GPU if automatic detection fails
+        return 0
 
 
 def log_files():

@@ -10,7 +10,7 @@ def train_one_epoch(epoch, model, tdl, vdl, acc, step, config, k=1):
     total_loss = 0
 
     for i, batch in enumerate(tdl):
-        outputs = model.training_step(batch)
+        outputs = model.training_step(batch, device=acc.device)
 
         # Extract non-loggable data
         non_logs = outputs.pop('non_logs', {})

@@ -138,4 +138,6 @@ class JEPAConfig(ConfigBase):
     model_type: str = 'JEPA'
     data_path: str = '/scratch/DL24FA/train'
     vicreg_loss: VicRegConfig = VicRegConfig()
+    action_reg_hidden_dim: str = '32'
+    lambda_reg: int = 0.2
     # You can add more configuration parameters as needed
