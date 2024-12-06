@@ -738,7 +738,6 @@ class AdversarialJEPAWithRegularization(BaseModel):
         states, actions = batch.states, batch.actions
         preds, enc_s = self.forward(states, actions)
         loss = self.compute_mse_loss(preds, enc_s)
-        learning_rate = self.optimizer.param_groups[0]["lr"]
 
         # Compute the absolute value of the action weights
         action_weight = (
@@ -762,7 +761,6 @@ class AdversarialJEPAWithRegularization(BaseModel):
         # Prepare the output dictionary
         output = {
             "loss": loss.item(),
-            "learning_rate": learning_rate,
             "action_weight_abs": action_weight_abs,
             "deviation_from_identity_pred_final_proj": deviation_from_identity.item(),  # Log the deviation
         }
