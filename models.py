@@ -717,6 +717,16 @@ class AdversarialJEPAWithRegularization(BaseModel):
             "deviation_from_identity_pred_final_proj": deviation_from_identity.item(),  # Log the deviation
         }
 
+        # Non-loggable data
+        output["non_logs"] = {
+            "states": states.detach(),
+            "actions": actions.detach(),
+            "enc_embeddings": enc_s.detach(),
+            "pred_embeddings": preds.detach(),
+        }
+
+        return output
+
     def validation_step(self, batch):
         states, actions = batch.states, batch.actions
         preds, enc_s = self.forward(states, actions)
