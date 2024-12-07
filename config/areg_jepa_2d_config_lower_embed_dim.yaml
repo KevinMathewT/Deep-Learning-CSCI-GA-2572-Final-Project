@@ -1,7 +1,7 @@
 embed_dim: 64
 action_dim: 2
 in_c: 2
-epochs: 50
+epochs: 20
 batch_size: 1536
 learning_rate: 0.0015
 model_type: 'ActionRegularizationJEPA2D'
