@@ -1730,13 +1730,13 @@ class ActionRegularizationJEPA2D(BaseModel):
         action_weight_abs = action_weight.abs().mean().item()
 
         # Compute deviation from identity for fc layer
-        fc_weight = self.pred.fc[1].weight  # Get the weights of the Linear layer inside fc
-        identity_matrix = torch.eye(fc_weight.size(0), fc_weight.size(1)).to(
-            fc_weight.device
-        )
-        deviation_from_identity = torch.norm(
-            fc_weight - identity_matrix, p="fro"
-        ) / torch.norm(identity_matrix, p="fro")
+        # fc_weight = self.pred.fc[1].weight  # Get the weights of the Linear layer inside fc
+        # identity_matrix = torch.eye(fc_weight.size(0), fc_weight.size(1)).to(
+        #     fc_weight.device
+        # )
+        # deviation_from_identity = torch.norm(
+        #     fc_weight - identity_matrix, p="fro"
+        # ) / torch.norm(identity_matrix, p="fro")
 
         # Prepare the output dictionary
         output = {
@@ -1744,7 +1744,7 @@ class ActionRegularizationJEPA2D(BaseModel):
             "grad_norm": grad_norm,
             "learning_rate": learning_rate,
             "action_weight_abs": action_weight_abs,
-            "deviation_from_identity_pred_final_proj": deviation_from_identity.item(),
+            # "deviation_from_identity_pred_final_proj": deviation_from_identity.item(),
             "action_reg_loss": action_reg_loss.item(),
             "invariance_loss": invariance_loss,
             "variance_loss": variance_loss,
@@ -1776,20 +1776,20 @@ class ActionRegularizationJEPA2D(BaseModel):
         action_weight_abs = action_weight.abs().mean().item()
 
         # Compute deviation from identity for fc layer
-        fc_weight = self.pred.fc[1].weight  # Get the weights of the Linear layer inside fc
-        identity_matrix = torch.eye(fc_weight.size(0), fc_weight.size(1)).to(
-            fc_weight.device
-        )
-        deviation_from_identity = torch.norm(
-            fc_weight - identity_matrix, p="fro"
-        ) / torch.norm(identity_matrix, p="fro")
+        # fc_weight = self.pred.fc[1].weight  # Get the weights of the Linear layer inside fc
+        # identity_matrix = torch.eye(fc_weight.size(0), fc_weight.size(1)).to(
+        #     fc_weight.device
+        # )
+        # deviation_from_identity = torch.norm(
+        #     fc_weight - identity_matrix, p="fro"
+        # ) / torch.norm(identity_matrix, p="fro")
 
         # Prepare the output dictionary
         output = {
             "loss": loss.item(),
             "learning_rate": learning_rate,
             "action_weight_abs": action_weight_abs,
-            "deviation_from_identity_pred_final_proj": deviation_from_identity.item(),  # Log the deviation
+            # "deviation_from_identity_pred_final_proj": deviation_from_identity.item(),  # Log the deviation
         }
 
         # Non-loggable data
