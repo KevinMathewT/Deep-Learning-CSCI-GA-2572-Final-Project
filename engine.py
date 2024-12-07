@@ -103,12 +103,10 @@ def train_one_epoch(
             acc.print(f"-------------------------------------------------------------")
 
     avg_epoch_loss = total_loss / len(tdl)
+    avg_losses.update({"avg_epoch_train_loss": avg_epoch_loss, "epoch": epoch + 1})
 
     # Log avg_epoch_train_loss at the end of the epoch
-    wandb.log(
-        {"avg_epoch_train_loss": avg_epoch_loss, "epoch": epoch + 1}.update(avg_losses),
-        step=step,
-    )
+    wandb.log(avg_losses, step=step)
 
     return step, avg_epoch_loss
 
