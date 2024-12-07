@@ -1569,7 +1569,7 @@ class ActionRegularizationJEPA2D(BaseModel):
 
             # Prepare inputs for the predictor
             states_embed = enc_states[:, :-1, :, :, :]  # (B, T-1, 1, H', W')
-            states_embed = states_embed.view(-1, 1, H_out, W_out)  # (B*(T-1), 1, H', W')
+            states_embed = states_embed.contiguous().view(-1, 1, H_out, W_out)  # (B*(T-1), 1, H', W')
             actions = actions.view(-1, self.config.action_dim)  # (B*(T-1), action_dim)
 
             pred_states = self.pred(states_embed, actions)  # (B*(T-1), 1, H', W')
