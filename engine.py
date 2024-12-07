@@ -31,17 +31,17 @@ def train_one_epoch(epoch, model, tdl, vdl, acc, step, config, k=1):
         # Wandb embedding visualization during training
         if step % 20 == 0 and states is not None and enc_embeddings is not None and pred_embeddings is not None:
             T = states.shape[1]
-            log_embeddings_wandb(
-                epoch=epoch,
-                batch_idx=i,
-                batch_states=states,
-                batch_actions=actions,
-                enc_embeddings=enc_embeddings,
-                pred_embeddings=pred_embeddings,
-                timesteps=[0, T // 3, 2 * T // 3],
-                phase="train",
-                step=step,
-            )
+            # log_embeddings_wandb(
+            #     epoch=epoch,
+            #     batch_idx=i,
+            #     batch_states=states,
+            #     batch_actions=actions,
+            #     enc_embeddings=enc_embeddings,
+            #     pred_embeddings=pred_embeddings,
+            #     timesteps=[0, T // 3, 2 * T // 3],
+            #     phase="train",
+            #     step=step,
+            # )
 
         step += 1
 
@@ -92,17 +92,17 @@ def val_one_epoch(epoch, model, vdl, acc, step, config, log_embeddings=False):
             # Wandb embedding visualization during validation
             if log_embeddings and i == 0 and states is not None and enc_embeddings is not None and pred_embeddings is not None:
                 T = states.shape[1]
-                log_embeddings_wandb(
-                    epoch=epoch,
-                    batch_idx=i,
-                    batch_states=states,
-                    batch_actions=actions,
-                    enc_embeddings=enc_embeddings,
-                    pred_embeddings=pred_embeddings,
-                    timesteps=[0, T // 3, 2 * T // 3],
-                    phase="valid",
-                    step=step,
-                )
+                # log_embeddings_wandb(
+                #     epoch=epoch,
+                #     batch_idx=i,
+                #     batch_states=states,
+                #     batch_actions=actions,
+                #     enc_embeddings=enc_embeddings,
+                #     pred_embeddings=pred_embeddings,
+                #     timesteps=[0, T // 3, 2 * T // 3],
+                #     phase="valid",
+                #     step=step,
+                # )
 
             step += 1
 
