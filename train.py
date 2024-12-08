@@ -63,6 +63,11 @@ def train_jepa(config):
     print("Initializing WandB...")
     wandb.init(project="DL Final Project", config=config_dict, settings=wandb.Settings(code_dir="."))
     print("WandB initialized.")
+
+    print("------ Configuration Parameters -----")
+    pprint(config)
+    print("-------------------------------------")
+    
     print("Logging files to WandB...")
     for f in log_files():
         print(f"Logging file: {f}")
@@ -103,10 +108,6 @@ def main():
     args = parser.parse_args()
 
     config = JEPAConfig.parse_from_file(args.config)
-
-    print("------ Configuration Parameters -----")
-    pprint(config)
-    print("-------------------------------------")
 
     seed_everything(42)  # Set the seed for reproducibility
     train_jepa(config)
