@@ -50,20 +50,22 @@ def get_scheduler(optimizer, config):
             anneal_strategy="cos",
         )
     elif scheduler_type == "linear":
+        warmup_epochs = 1
         scheduler = torch.optim.lr_scheduler.SequentialLR(
             optimizer,
             schedulers=[
-                torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=0.1, total_iters=config.warmup_epochs),
-                torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=1.0, end_factor=0.0, total_iters=config.total_epochs - config.warmup_epochs)
+                torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=0.1, total_iters=warmup_epochs),
+                torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=1.0, end_factor=0.0, total_iters=config.total_epochs - warmup_epochs)
             ],
             milestones=[config.warmup_epochs]
         )
     elif scheduler_type == "cosine":
+        warmup_epochs = 1
         scheduler = torch.optim.lr_scheduler.SequentialLR(
             optimizer,
             schedulers=[
-                torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=0.1, total_iters=config.warmup_epochs),
-                torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=config.total_epochs - config.warmup_epochs, eta_min=config.min_lr)
+                torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=0.1, total_iters=warmup_epochs),
+                torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=config.total_epochs - warmup_epochs, eta_min=config.min_lr)
             ],
             milestones=[config.warmup_epochs]
         )
