@@ -46,6 +46,8 @@ def get_scheduler(optimizer, config):
             max_lr=config.learning_rate,
             steps_per_epoch=config.steps_per_epoch,
             epochs=config.epochs,
+            pct_start=0.05,
+            anneal_strategy="cos",
         )
     elif scheduler_type == "linear":
         scheduler = torch.optim.lr_scheduler.SequentialLR(
