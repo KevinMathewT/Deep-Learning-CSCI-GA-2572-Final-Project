@@ -76,7 +76,7 @@ def train_one_epoch(
             model.train()
 
         losses_dict = {}
-        if (epoch + 1) % 2 == 0:
+        if (epoch + 1) % 1 == 0:
         # if (i + 1) % (len(tdl) // l) == 0:
             acc.print(f"------ Running Probing Evaluator for epoch {epoch + 1} ------")
             # Evaluate the model using the probing evaluator
