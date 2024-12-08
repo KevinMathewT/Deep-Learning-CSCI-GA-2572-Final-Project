@@ -5,9 +5,9 @@ def get_optimizer(config, parameters):
         optimizer = torch.optim.Adam(
             parameters, 
             lr=config.learning_rate,
-            betas=(0.9, 0.999),
-            eps=1e-08,
-            weight_decay=1e-5,
+            # betas=(0.9, 0.999),
+            # eps=1e-08,
+            # weight_decay=1e-5,
         )
     elif config.optimizer_type == "adamw":
         optimizer = torch.optim.AdamW(

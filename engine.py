@@ -12,7 +12,7 @@ best_wall_loss = float("inf")
 
 
 def train_one_epoch(
-    epoch, model, tdl, vdl, acc, step, config, probe_train_ds, probe_val_ds, k=1, l=2
+    epoch, model, tdl, vdl, acc, step, config, probe_train_ds, probe_val_ds, k=1, l=4
 ):
     global best_normal_loss, best_wall_loss
     
