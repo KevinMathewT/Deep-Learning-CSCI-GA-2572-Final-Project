@@ -74,7 +74,7 @@ def train_one_epoch(
             acc.print(f"[{epoch + 1}/{config.epochs}] valid epoch loss: {val_loss:.5f}")
             acc.print(f"\n---------------------------------------\n")
             model.train()
-        
+
         if (i + 1) % (len(tdl) // l) == 0:
             acc.print(f"------ Running Probing Evaluator for epoch {epoch + 1} ------")
             # Evaluate the model using the probing evaluator
