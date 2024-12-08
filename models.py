@@ -1917,7 +1917,7 @@ class ActionRegularizationJEPA2DVICReg(BaseModel):
         return reg_loss
 
     def compute_vicreg_loss_2d(
-        preds, enc_s, config, patch_size=(2, 2), gamma=1.0, epsilon=1e-4
+        self, preds, enc_s, patch_size=(2, 2), gamma=1.0, epsilon=1e-4
     ):
         """
         Compute VICReg loss by leveraging the 2D structure using patch-level representations.
