@@ -1466,14 +1466,14 @@ class Encoder2D(nn.Module):
         self.conv = nn.Sequential(*layers)
 
         # Apply weight initialization
-        self._initialize_weights()
+    #     self._initialize_weights()
 
-    def _initialize_weights(self):
-        for layer in self.conv:
-            if isinstance(layer, nn.Conv2d):
-                nn.init.kaiming_normal_(layer.weight, nonlinearity='leaky_relu')
-                if layer.bias is not None:
-                    nn.init.constant_(layer.bias, 0)
+    # def _initialize_weights(self):
+    #     for layer in self.conv:
+    #         if isinstance(layer, nn.Conv2d):
+    #             nn.init.kaiming_normal_(layer.weight, nonlinearity='leaky_relu')
+    #             if layer.bias is not None:
+    #                 nn.init.constant_(layer.bias, 0)
 
     def forward(self, x):
         # Input: (B, 2, 65, 65)
@@ -1502,14 +1502,14 @@ class Predictor2D(nn.Module):
         )
 
         # Apply weight initialization
-        self._initialize_weights()
+    #     self._initialize_weights()
 
-    def _initialize_weights(self):
-        for layer in self.conv:
-            if isinstance(layer, nn.Conv2d):
-                nn.init.kaiming_normal_(layer.weight, nonlinearity='leaky_relu')
-                if layer.bias is not None:
-                    nn.init.constant_(layer.bias, 0)
+    # def _initialize_weights(self):
+    #     for layer in self.conv:
+    #         if isinstance(layer, nn.Conv2d):
+    #             nn.init.kaiming_normal_(layer.weight, nonlinearity='leaky_relu')
+    #             if layer.bias is not None:
+    #                 nn.init.constant_(layer.bias, 0)
 
         for layer in self.action_proj:
             if isinstance(layer, nn.Linear):
@@ -1543,11 +1543,11 @@ class ActionRegularizer2D(nn.Module):
         )
 
         # Weight initialization
-        for layer in self.action_reg_net:
-            if isinstance(layer, nn.Conv2d):
-                nn.init.kaiming_normal_(layer.weight, nonlinearity='leaky_relu')
-            elif isinstance(layer, nn.Linear):
-                nn.init.xavier_normal_(layer.weight)
+        # for layer in self.action_reg_net:
+        #     if isinstance(layer, nn.Conv2d):
+        #         nn.init.kaiming_normal_(layer.weight, nonlinearity='leaky_relu')
+        #     elif isinstance(layer, nn.Linear):
+        #         nn.init.xavier_normal_(layer.weight)
 
     def forward(self, states_embed, pred_states):
         """
