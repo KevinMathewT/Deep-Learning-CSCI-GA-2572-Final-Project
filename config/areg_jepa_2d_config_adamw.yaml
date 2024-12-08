@@ -6,7 +6,7 @@ batch_size: 1536
 learning_rate: 0.0015
 model_type: 'ActionRegularizationJEPA2D'
 data_path: '/scratch/DL24FA/train'
-optimizer_type: 'adam'
+optimizer_type: 'adamw'
 scheduler_type: 'onecycle'
 
 # action regularization
