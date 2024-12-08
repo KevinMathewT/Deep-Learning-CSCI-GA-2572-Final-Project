@@ -67,7 +67,7 @@ def train_jepa(config):
     print("------ Configuration Parameters -----")
     pprint(config)
     print("-------------------------------------")
-    
+
     print("Logging files to WandB...")
     for f in log_files():
         print(f"Logging file: {f}")
@@ -102,6 +102,8 @@ def train_jepa(config):
 # python -m train --config config/areg_jepa_2d_config_covariance_0.yaml
 # python -m train --config config/areg_jepa_2d_vicreg_config.yaml
 # python -m train --config config/areg_jepa_2d_config_smaller_bs.yaml
+# python -m train --config config/areg_jepa_2d_config_adamw.yaml
+# python -m train --config config/areg_jepa_2d_config_adamw_linear.yaml
 def main():
     parser = argparse.ArgumentParser(description='Train different models.')
     parser.add_argument('--config', type=str, help='Path to configuration file')
