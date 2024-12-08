@@ -1759,7 +1759,7 @@ class ActionRegularizationJEPA2D(BaseModel):
         learning_rate = self.optimizer.param_groups[0]["lr"]
 
         # Compute the absolute value of the action weights
-        action_weight = self.pred.action_proj.weight  # Project action weights
+        action_weight = self.pred.action_proj[0].weight  # Project action weights
         action_weight_abs = action_weight.abs().mean().item()
 
         # Compute deviation from identity for fc layer
@@ -2042,7 +2042,7 @@ class ActionRegularizationJEPA2DVICReg(BaseModel):
 
         # Compute VICReg Loss
         vic_reg_loss, invariance_loss, variance_loss, covariance_loss = (
-            self.compute_vicreg_loss(preds, enc_s)
+            self.compute_vicreg_loss_2d(preds, enc_s)
         )  # VICReg Loss Calculation
 
         # Combine losses
