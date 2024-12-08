@@ -1,0 +1,17 @@
+embed_dim: 256
+action_dim: 2
+in_c: 2
+epochs: 20
+batch_size: 256
+learning_rate: 0.00015
+model_type: 'ActionRegularizationJEPA2D'
+data_path: '/scratch/DL24FA/train'
+
+# action regularization
+action_reg_hidden_dim: 32
+lambda_reg: 1
+
+vicreg_loss:
+  lambda_invariance: 1
+  mu_variance: 25
+  nu_covariance: 1
