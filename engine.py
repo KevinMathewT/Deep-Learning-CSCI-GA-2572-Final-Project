@@ -12,7 +12,7 @@ best_wall_loss = float("inf")
 
 
 def train_one_epoch(
-    epoch, model, tdl, vdl, acc, step, config, probe_train_ds, probe_val_ds, k=1, l=2
+    epoch, model, tdl, vdl, acc, step, config, probe_train_ds, probe_val_ds, k=1, l=1
 ):
     global best_normal_loss, best_wall_loss
     
@@ -76,8 +76,7 @@ def train_one_epoch(
             model.train()
 
         losses_dict = {}
-        if (epoch + 1) % 1 == 0:
-        # if (i + 1) % (len(tdl) // l) == 0:
+        if ((epoch + 1) % 1 == 0) and ((i + 1) % (len(tdl) // l) == 0):
             acc.print(f"------ Running Probing Evaluator for epoch {epoch + 1} ------")
             # Evaluate the model using the probing evaluator
             avg_losses = evaluate_model(acc.device, model, probe_train_ds, probe_val_ds)
