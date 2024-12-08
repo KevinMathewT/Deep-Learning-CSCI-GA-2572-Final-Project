@@ -57,7 +57,7 @@ def get_scheduler(optimizer, config):
                 torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=0.1, total_iters=warmup_epochs),
                 torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=1.0, end_factor=0.0, total_iters=config.epochs - warmup_epochs)
             ],
-            milestones=[config.warmup_epochs]
+            milestones=[warmup_epochs]
         )
     elif scheduler_type == "cosine":
         warmup_epochs = 1
@@ -67,7 +67,7 @@ def get_scheduler(optimizer, config):
                 torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=0.1, total_iters=warmup_epochs),
                 torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=config.epochs - warmup_epochs, eta_min=0)
             ],
-            milestones=[config.warmup_epochs]
+            milestones=[warmup_epochs]
         )
     else:
         raise ValueError("Invalid scheduler type")
