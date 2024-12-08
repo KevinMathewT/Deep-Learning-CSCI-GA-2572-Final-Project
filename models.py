@@ -1944,9 +1944,9 @@ class ActionRegularizationJEPA2DVICReg(BaseModel):
             covariance_loss: Covariance component.
         """
 
-        lambda_invariance = config.vicreg_loss.lambda_invariance
-        mu_variance = config.vicreg_loss.mu_variance
-        nu_covariance = config.vicreg_loss.nu_covariance
+        lambda_invariance = self.config.vicreg_loss.lambda_invariance
+        mu_variance = self.config.vicreg_loss.mu_variance
+        nu_covariance = self.config.vicreg_loss.nu_covariance
 
         preds, enc_s = preds[:, 1:], enc_s[:, 1:]  # Drop the first timestep
         B, T, _, H, W = preds.shape
