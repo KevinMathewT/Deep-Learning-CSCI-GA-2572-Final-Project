@@ -75,6 +75,7 @@ def train_one_epoch(
             acc.print(f"\n---------------------------------------\n")
             model.train()
 
+        losses_dict = {}
         if (epoch + 1) % 2 == 0:
         # if (i + 1) % (len(tdl) // l) == 0:
             acc.print(f"------ Running Probing Evaluator for epoch {epoch + 1} ------")
@@ -103,11 +104,12 @@ def train_one_epoch(
 
             acc.print(f"-------------------------------------------------------------")
 
-    avg_epoch_loss = total_loss / len(tdl)
-    avg_losses.update({"avg_epoch_train_loss": avg_epoch_loss, "epoch": epoch + 1})
+            losses_dict.update(avg_losses)
 
     # Log avg_epoch_train_loss at the end of the epoch
-    wandb.log(avg_losses, step=step)
+    avg_epoch_loss = total_loss / len(tdl)
+    losses_dict.update({"avg_epoch_train_loss": avg_epoch_loss, "epoch": epoch + 1})
+    wandb.log(losses_dict, step=step)
 
     return step, avg_epoch_loss
 
