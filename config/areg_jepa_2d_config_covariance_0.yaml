@@ -13,5 +13,5 @@ lambda_reg: 1
 
 vicreg_loss:
   lambda_invariance: 1
-  mu_variance: 30
-  nu_covariance: 0
+  mu_variance: 25
+  nu_covariance: 1
