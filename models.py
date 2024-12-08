@@ -1425,6 +1425,10 @@ class ActionRegularizationJEPA(BaseModel):
         return output
 
 
+import math
+import torch
+import torch.nn as nn
+
 class Encoder2D(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -1440,7 +1444,7 @@ class Encoder2D(nn.Module):
         
         layers = []
         in_channels = 2  # Input has 2 channels (agent and wall)
-        out_channels = 16  # Start with 32 output channels
+        out_channels = 16  # Start with 16 output channels
         for i in range(self.num_conv_blocks):
             layers.append(
                 nn.Conv2d(
@@ -1448,17 +1452,11 @@ class Encoder2D(nn.Module):
                     out_channels,
                     kernel_size=3,
                     stride=2,
-                    padding=0,
-                ) if i == 0 else
-                nn.Conv2d(
-                    in_channels,
-                    out_channels,
-                    kernel_size=3,
-                    stride=2,
-                    padding=1,
+                    padding=0 if i == 0 else 1,  # First layer without padding
                 )
             )  # Halve the spatial dimensions
-            layers.append(nn.ReLU())
+            layers.append(nn.BatchNorm2d(out_channels))  # Add BatchNorm for better training stability
+            layers.append(nn.LeakyReLU())
             in_channels = out_channels
             out_channels = min(out_channels * 2, 256)  # Cap channels at 256
 
@@ -1466,6 +1464,16 @@ class Encoder2D(nn.Module):
         layers.append(nn.Conv2d(in_channels, 1, kernel_size=1))  # Single-channel embedding
 
         self.conv = nn.Sequential(*layers)
+
+        # Apply weight initialization
+        self._initialize_weights()
+
+    def _initialize_weights(self):
+        for layer in self.conv:
+            if isinstance(layer, nn.Conv2d):
+                nn.init.kaiming_normal_(layer.weight, nonlinearity='leaky_relu')
+                if layer.bias is not None:
+                    nn.init.constant_(layer.bias, 0)
 
     def forward(self, x):
         # Input: (B, 2, 65, 65)
@@ -1480,17 +1488,34 @@ class Predictor2D(nn.Module):
         self.repr_dim = config.embed_dim
         self.output_side = int(math.sqrt(self.repr_dim))  # Calculate 2D embedding dimensions
 
-        self.action_proj = nn.Linear(self.config.action_dim, self.output_side ** 2)  # Project action to repr_dim
-        # Optionally, you can add a projection for the state embedding
-        # self.state_proj = nn.Linear(self.repr_dim, self.repr_dim)
-        # For simplicity, we'll assume identity for state embedding
+        self.action_proj = nn.Sequential(
+            nn.Linear(self.config.action_dim, self.output_side ** 2),  # Project action to repr_dim
+            nn.LayerNorm(self.output_side ** 2),  # Add LayerNorm to stabilize action projection
+        )
 
         self.conv = nn.Sequential(
             nn.Conv2d(2, 32, kernel_size=3, stride=1, padding=1),  # Combine state and action
-            nn.ReLU(),
+            nn.BatchNorm2d(32),  # Add BatchNorm for stability
+            nn.LeakyReLU(),
             nn.Conv2d(32, 1, kernel_size=3, stride=1, padding=1),  # Reduce to single-channel
-            nn.ReLU(),
+            nn.LeakyReLU(),
         )
+
+        # Apply weight initialization
+        self._initialize_weights()
+
+    def _initialize_weights(self):
+        for layer in self.conv:
+            if isinstance(layer, nn.Conv2d):
+                nn.init.kaiming_normal_(layer.weight, nonlinearity='leaky_relu')
+                if layer.bias is not None:
+                    nn.init.constant_(layer.bias, 0)
+
+        for layer in self.action_proj:
+            if isinstance(layer, nn.Linear):
+                nn.init.xavier_normal_(layer.weight)
+                if layer.bias is not None:
+                    nn.init.constant_(layer.bias, 0)
 
     def forward(self, s_embed, a):
         # s_embed: (B, 1, output_side, output_side)
@@ -1502,6 +1527,7 @@ class Predictor2D(nn.Module):
         x = torch.cat([s_embed, a_proj], dim=1)  # Combine state and action: (B, 2, H, W)
         x = self.conv(x)  # Process combined input: (B, 1, H, W)
         return x  # Predicted embedding: (B, 1, H, W)
+
     
 
 class ActionRegularizer2D(nn.Module):
@@ -1515,6 +1541,13 @@ class ActionRegularizer2D(nn.Module):
             nn.Flatten(),  # Flatten to prepare for linear mapping
             nn.Linear(self.output_side * self.output_side, action_dim),  # Map to action_dim
         )
+
+        # Weight initialization
+        for layer in self.action_reg_net:
+            if isinstance(layer, nn.Conv2d):
+                nn.init.kaiming_normal_(layer.weight, nonlinearity='leaky_relu')
+            elif isinstance(layer, nn.Linear):
+                nn.init.xavier_normal_(layer.weight)
 
     def forward(self, states_embed, pred_states):
         """
@@ -1803,6 +1836,311 @@ class ActionRegularizationJEPA2D(BaseModel):
         return output
 
 
+class ActionRegularizationJEPA2DVICReg(BaseModel):
+    def __init__(self, config):
+        super().__init__(config)
+        self.enc = Encoder2D(config)
+        self.pred = Predictor2D(config)
+        self.action_reg_net = ActionRegularizer2D(config.embed_dim, config.action_dim)  # Small network for action prediction from embedding differences
+
+        self.optimizer = torch.optim.Adam(self.parameters(), lr=config.learning_rate)
+        self.scheduler = OneCycleLR(
+            self.optimizer,
+            max_lr=config.learning_rate,
+            steps_per_epoch=config.steps_per_epoch,
+            epochs=config.epochs,
+            pct_start=0.05,
+            anneal_strategy="cos",
+        )
+
+        self.config = config
+        self.repr_dim = config.embed_dim
+
+    def forward(self, states, actions, teacher_forcing=True):
+        B, _, C, H, W = states.shape  # states: (B, T, C, H, W)
+        T = actions.shape[1] + 1  # Number of timesteps | actions: (B, T-1, action_dim)
+
+        if teacher_forcing:
+            states = states.view(B * T, C, H, W)  # Reshape to (B*T, C, H, W)
+
+            enc_states = self.enc(states)  # (B*T, 1, H', W')
+            _, _, H_out, W_out = enc_states.shape
+            enc_states = enc_states.view(B, T, 1, H_out, W_out)  # (B, T, 1, H', W')
+            preds = torch.zeros_like(enc_states)  # preds: (B, T, 1, H', W')
+            preds[:, 0, :, :, :] = enc_states[:, 0, :, :, :]  # Initialize first timestep
+
+            # Prepare inputs for the predictor
+            states_embed = enc_states[:, :-1, :, :, :]  # (B, T-1, 1, H', W')
+            states_embed = states_embed.contiguous().view(-1, 1, H_out, W_out)  # (B*(T-1), 1, H', W')
+            actions = actions.view(-1, self.config.action_dim)  # (B*(T-1), action_dim)
+
+            pred_states = self.pred(states_embed, actions)  # (B*(T-1), 1, H', W')
+            pred_states = pred_states.view(B, T - 1, 1, H_out, W_out)  # (B, T-1, 1, H', W')
+            preds[:, 1:, :, :, :] = pred_states  # Assign predictions to preds
+
+            return preds, enc_states  # preds: (B, T, 1, H', W'), enc_states: (B, T, 1, H', W')
+
+        else:
+            states_0 = states[:, 0, :, :, :]  # (B, C, H, W)
+            enc_state = self.enc(states_0)  # (B, 1, H', W')
+            preds = [enc_state]  # List to store predictions
+
+            for t in range(1, T):
+                action_t_minus1 = actions[:, t - 1, :]  # (B, action_dim)
+                state_embed_t_minus1 = preds[-1]  # Use the last predicted embedding (B, 1, H', W')
+                pred_state = self.pred(state_embed_t_minus1, action_t_minus1)  # (B, 1, H', W')
+                preds.append(pred_state)
+
+            # Stack predictions and true encodings along the time dimension
+            preds = torch.stack(preds, dim=1)  # (B, T, 1, H', W')
+            preds = preds.view(B, T, -1)  # (B, T, H'*W')
+            return preds
+
+    def compute_mse_loss(self, preds, enc_s):
+        # preds, enc_s: (B, T, 1, H', W') 
+        loss = F.mse_loss(
+            preds[:, 1:], enc_s[:, 1:]
+        )  # Compute MSE loss for timesteps 1 to T-1
+        return loss
+
+    def compute_regularization_loss(self, states_embed, pred_states, actions):
+        """
+        Computes the regularization loss based on the embedding difference and actions.
+        """
+        # states_embed and pred_states: (B*(T-1), 1, H', W')
+        # actions: (B*(T-1), action_dim)
+        # Predict actions from embedding differences
+        predicted_actions = self.action_reg_net(states_embed, pred_states)  # (B*(T-1), action_dim)
+
+        # Compute MSE loss between predicted and actual actions
+        reg_loss = F.mse_loss(predicted_actions, actions)
+        return reg_loss
+
+    def compute_vicreg_loss_2d(
+        preds, enc_s, config, patch_size=(2, 2), gamma=1.0, epsilon=1e-4
+    ):
+        """
+        Compute VICReg loss by leveraging the 2D structure using patch-level representations.
+        Instead of flattening all spatial dimensions into one big vector, we:
+        1. Divide the spatial dimensions into patches.
+        2. Extract patch-level mean features.
+        3. Compute invariance, variance, and covariance losses on these patch-level features.
+
+        Args:
+            preds: Predicted embeddings from the predictor. Shape (B, T, 1, H, W).
+            enc_s: Target embeddings from the encoder. Shape (B, T, 1, H, W).
+            config: Configuration object with VICReg hyperparameters:
+                config.vicreg_loss.lambda_invariance
+                config.vicreg_loss.mu_variance
+                config.vicreg_loss.nu_covariance
+            patch_size: (ph, pw) size of each patch.
+            gamma: Target standard deviation for variance term.
+            epsilon: Small value to avoid numerical instability.
+
+        Returns:
+            vicreg_loss: The combined VICReg loss.
+            invariance_loss: Invariance component.
+            variance_loss: Variance component.
+            covariance_loss: Covariance component.
+        """
+
+        lambda_invariance = config.vicreg_loss.lambda_invariance
+        mu_variance = config.vicreg_loss.mu_variance
+        nu_covariance = config.vicreg_loss.nu_covariance
+
+        preds, enc_s = preds[:, 1:], enc_s[:, 1:]  # Drop the first timestep
+        B, T, _, H, W = preds.shape
+
+        ph, pw = patch_size
+        assert H % ph == 0 and W % pw == 0, "Patch size must evenly divide H and W."
+
+        # Number of patches along each dimension
+        nh = H // ph
+        nw = W // pw
+        num_patches = nh * nw
+
+        # Extract patch-level features by mean pooling within each patch
+        # preds_patches and enc_s_patches will have shape (B, T, num_patches)
+        preds_patches = []
+        enc_s_patches = []
+        for i in range(nh):
+            for j in range(nw):
+                # Extract patch [i*ph:(i+1)*ph, j*pw:(j+1)*pw]
+                patch_preds = preds[:, :, :, i*ph:(i+1)*ph, j*pw:(j+1)*pw]
+                patch_enc_s = enc_s[:, :, :, i*ph:(i+1)*ph, j*pw:(j+1)*pw]
+
+                # Mean pool over patch area
+                # patch_preds shape: (B, T, 1, ph, pw) -> mean over (ph, pw)
+                # result shape: (B, T, 1)
+                patch_preds_mean = patch_preds.mean(dim=[3,4])  # (B, T, 1)
+                patch_enc_s_mean = patch_enc_s.mean(dim=[3,4])  # (B, T, 1)
+
+                preds_patches.append(patch_preds_mean)
+                enc_s_patches.append(patch_enc_s_mean)
+
+        # Stack along the last dimension to get (B, T, num_patches)
+        preds_patches = torch.cat(preds_patches, dim=-1).squeeze(2)   # (B, T, num_patches)
+        enc_s_patches = torch.cat(enc_s_patches, dim=-1).squeeze(2)   # (B, T, num_patches)
+
+        # Combine B and T into one batch dimension for computation
+        Z = preds_patches.reshape(B * T, num_patches)     # (B*T, num_patches)
+        Z_prime = enc_s_patches.reshape(B * T, num_patches)
+
+        # --- Invariance Term ---
+        # Element-wise MSE between corresponding patches
+        invariance_loss = torch.mean(torch.sum((Z - Z_prime) ** 2, dim=1))
+
+        # --- Variance Term ---
+        # Compute standard deviation along the batch dimension for each patch
+        std_Z = torch.sqrt(Z.var(dim=0, unbiased=False) + epsilon)
+        std_Z_prime = torch.sqrt(Z_prime.var(dim=0, unbiased=False) + epsilon)
+        variance_loss = torch.mean(F.relu(gamma - std_Z)) + torch.mean(F.relu(gamma - std_Z_prime))
+
+        # --- Covariance Term ---
+        # Center the embeddings
+        Z_centered = Z - Z.mean(dim=0, keepdim=True)
+        Z_prime_centered = Z_prime - Z_prime.mean(dim=0, keepdim=True)
+
+        # Compute covariance matrices
+        cov_Z = (Z_centered.T @ Z_centered) / (B * T - 1)
+        cov_Z_prime = (Z_prime_centered.T @ Z_prime_centered) / (B * T - 1)
+
+        # Off-diagonal elements
+        cov_loss_Z = torch.sum(cov_Z**2) - torch.sum(torch.diag(cov_Z)**2)
+        cov_loss_Z_prime = torch.sum(cov_Z_prime**2) - torch.sum(torch.diag(cov_Z_prime)**2)
+
+        covariance_loss = cov_loss_Z + cov_loss_Z_prime
+
+        # --- Total VICReg Loss ---
+        vicreg_loss = (
+            lambda_invariance * invariance_loss
+            + mu_variance * variance_loss
+            + nu_covariance * covariance_loss
+        )
+
+        return vicreg_loss, invariance_loss, variance_loss, covariance_loss
+
+    def training_step(self, batch, device):
+        states, actions = batch.states.to(device, non_blocking=True), batch.actions.to(
+            device, non_blocking=True
+        )
+        preds, enc_s = self.forward(states, actions)  # preds, enc_s: (B, T, 1, H, W)
+
+        # Compute regularization loss
+        B, T, _, H, W = enc_s.shape  # (B, T, 1, H, W)
+        states_embed = enc_s[:, :-1, :, :, :].reshape(
+            -1, 1, H, W
+        )  # Input to predictor: (B*(T-1), 1, H, W)
+        pred_states = preds[:, 1:, :, :, :].reshape(
+            -1, 1, H, W
+        )  # Output of predictor: (B*(T-1), 1, H, W)
+        actions = actions.reshape(-1, self.config.action_dim)  # Actions: (B*(T-1), action_dim)
+
+        action_reg_loss = self.compute_regularization_loss(
+            states_embed, pred_states, actions
+        )  # Uses ActionRegularizer2D internally
+
+        # Compute VICReg Loss
+        vic_reg_loss, invariance_loss, variance_loss, covariance_loss = (
+            self.compute_vicreg_loss(preds, enc_s)
+        )  # VICReg Loss Calculation
+
+        # Combine losses
+        total_loss = vic_reg_loss + self.config.lambda_reg * action_reg_loss
+
+        self.optimizer.zero_grad()
+        total_loss.backward()
+
+        # Compute grad_norm without clipping
+        grad_norm = 0.0
+        for p in self.parameters():
+            if p.grad is not None:
+                param_norm = p.grad.data.norm(2)
+                grad_norm += param_norm.item() ** 2
+        grad_norm = grad_norm**0.5
+
+        self.optimizer.step()
+        self.scheduler.step()  # Step the scheduler
+
+        learning_rate = self.optimizer.param_groups[0]["lr"]
+
+        # Compute the absolute value of the action weights
+        action_weight = self.pred.action_proj.weight  # Project action weights
+        action_weight_abs = action_weight.abs().mean().item()
+
+        # Compute deviation from identity for fc layer
+        # fc_weight = self.pred.fc[1].weight  # Get the weights of the Linear layer inside fc
+        # identity_matrix = torch.eye(fc_weight.size(0), fc_weight.size(1)).to(
+        #     fc_weight.device
+        # )
+        # deviation_from_identity = torch.norm(
+        #     fc_weight - identity_matrix, p="fro"
+        # ) / torch.norm(identity_matrix, p="fro")
+
+        # Prepare the output dictionary
+        output = {
+            "loss": total_loss.item(),
+            "grad_norm": grad_norm,
+            "learning_rate": learning_rate,
+            "action_weight_abs": action_weight_abs,
+            # "deviation_from_identity_pred_final_proj": deviation_from_identity.item(),
+            "action_reg_loss": action_reg_loss.item(),
+            "invariance_loss": invariance_loss,
+            "variance_loss": variance_loss,
+            "covariance_loss": covariance_loss,
+        }
+
+        # Non-loggable data
+        output["non_logs"] = {
+            "states": states.detach(),
+            "actions": actions.detach(),
+            "enc_embeddings": enc_s.detach(),
+            "pred_embeddings": preds.detach(),
+        }
+
+        return output
+
+    def validation_step(self, batch):
+        states, actions = batch.states, batch.actions
+        preds, enc_s = self.forward(states, actions)  # preds, enc_s: (B, T, 1, H, W)
+
+        # Compute MSE Loss
+        loss = self.compute_mse_loss(preds, enc_s)  # preds, enc_s: (B, T, 1, H, W)
+
+        # Learning rate
+        learning_rate = self.optimizer.param_groups[0]["lr"]
+
+        # Compute the absolute value of the action weights
+        action_weight = self.pred.action_proj.weight  # Project action weights
+        action_weight_abs = action_weight.abs().mean().item()
+
+        # Compute deviation from identity for fc layer
+        # fc_weight = self.pred.fc[1].weight  # Get the weights of the Linear layer inside fc
+        # identity_matrix = torch.eye(fc_weight.size(0), fc_weight.size(1)).to(
+        #     fc_weight.device
+        # )
+        # deviation_from_identity = torch.norm(
+        #     fc_weight - identity_matrix, p="fro"
+        # ) / torch.norm(identity_matrix, p="fro")
+
+        # Prepare the output dictionary
+        output = {
+            "loss": loss.item(),
+            "learning_rate": learning_rate,
+            "action_weight_abs": action_weight_abs,
+            # "deviation_from_identity_pred_final_proj": deviation_from_identity.item(),  # Log the deviation
+        }
+
+        # Non-loggable data
+        output["non_logs"] = {
+            "states": states.detach(),
+            "actions": actions.detach(),
+            "enc_embeddings": enc_s.detach(),
+            "pred_embeddings": preds.detach(),
+        }
+
+        return output
+
 
 # Model mapping and get_model function
 MODEL_MAP: Dict[str, BaseModel] = {
@@ -1812,6 +2150,7 @@ MODEL_MAP: Dict[str, BaseModel] = {
     "ActionRegularizationJEPA": ActionRegularizationJEPA,
     "AdversarialJEPAWithRegularization": AdversarialJEPAWithRegularization,
     "ActionRegularizationJEPA2D": ActionRegularizationJEPA2D,
+    "ActionRegularizationJEPA2DVICReg": ActionRegularizationJEPA2DVICReg,
     # Add more models here as needed
 }
 
