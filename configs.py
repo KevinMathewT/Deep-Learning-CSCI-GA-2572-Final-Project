@@ -134,6 +134,8 @@ class JEPAConfig(ConfigBase):
     in_c: int = 2
     epochs: int = 20
     batch_size: int = 1024
+    optimizer_type: str = 'adamw'
+    schduler_type: str = 'linear'
     learning_rate: float = 0.001
     model_type: str = 'JEPA'
     data_path: str = '/scratch/DL24FA/train'

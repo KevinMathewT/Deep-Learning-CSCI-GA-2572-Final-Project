@@ -6,6 +6,8 @@ batch_size: 1024
 learning_rate: 0.0001
 model_type: 'AdversarialJEPAWithRegularization'
 data_path: '/scratch/DL24FA/train'
+optimizer_type: 'adam'
+scheduler_type: 'onecycle'
 
 # action regularization
 action_reg_hidden_dim: 32

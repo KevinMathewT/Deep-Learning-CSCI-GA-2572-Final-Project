@@ -4,7 +4,8 @@ import numpy as np
 from torch import nn
 from torch.nn import functional as F
 import torch
-from torch.optim.lr_scheduler import OneCycleLR
+
+from optimizer import get_optimizer, get_scheduler
 
 from configs import JEPAConfig
 
@@ -151,15 +152,8 @@ class JEPA(BaseModel):
         super().__init__(config)
         self.enc = Encoder(config)
         self.pred = Predictor(config)
-        self.optimizer = torch.optim.Adam(self.parameters(), lr=config.learning_rate)
-        self.scheduler = OneCycleLR(
-            self.optimizer,
-            max_lr=config.learning_rate,
-            steps_per_epoch=config.steps_per_epoch,
-            epochs=config.epochs,
-            pct_start=0.05,
-            anneal_strategy="cos",
-        )
+        self.optimizer = get_optimizer(config, self.parameters())
+        self.scheduler = get_scheduler(self.optimizer, config)
 
         self.config = config
         self.repr_dim = config.embed_dim
@@ -445,28 +439,11 @@ class AdversarialJEPAWithRegularization(BaseModel):
             config.embed_dim, config.action_dim, config.action_reg_hidden_dim
         )
 
-        self.gen_opt = torch.optim.Adam(
-            list(self.enc.parameters())
-            + list(self.pred.parameters())
-            + list(self.action_reg_net.parameters()),
-            lr=config.learning_rate,
-        )
-        self.disc_opt = torch.optim.Adam(
-            self.disc.parameters(), lr=config.learning_rate
-        )
+        self.gen_opt = get_optimizer(config, list(self.enc.parameters()) + list(self.pred.parameters()) + list(self.action_reg_net.parameters()))
+        self.disc_opt = get_optimizer(config, self.disc.parameters())
 
-        self.gen_sched = OneCycleLR(
-            self.gen_opt,
-            max_lr=config.learning_rate,
-            steps_per_epoch=config.steps_per_epoch,
-            epochs=config.epochs,
-        )
-        self.disc_sched = OneCycleLR(
-            self.disc_opt,
-            max_lr=config.learning_rate,
-            steps_per_epoch=config.steps_per_epoch,
-            epochs=config.epochs,
-        )
+        self.gen_sched = get_scheduler(self.gen_opt, config)
+        self.disc_sched = get_scheduler(self.disc_opt, config)
 
         self.config = config
         self.repr_dim = config.embed_dim
@@ -784,23 +761,11 @@ class AdversarialJEPA(BaseModel):
         self.enc = Encoder(config)
         self.pred = Predictor(config)
         self.disc = Discriminator(config.embed_dim)
-        self.opt = torch.optim.Adam(self.parameters(), lr=config.learning_rate)
-        self.disc_opt = torch.optim.Adam(
-            self.disc.parameters(), lr=config.learning_rate
-        )
+        self.opt = get_optimizer(config, self.parameters())
+        self.disc_opt = get_optimizer(config, self.disc.parameters())
 
-        self.scheduler = OneCycleLR(
-            self.opt,
-            max_lr=config.learning_rate,
-            steps_per_epoch=config.steps_per_epoch,
-            epochs=config.epochs,
-        )
-        self.scheduler_disc = OneCycleLR(
-            self.disc_opt,
-            max_lr=config.learning_rate,
-            steps_per_epoch=config.steps_per_epoch,
-            epochs=config.epochs,
-        )
+        self.scheduler = get_scheduler(self.opt, config)
+        self.scheduler_disc = get_scheduler(self.disc_opt, config)
 
         self.config = config
         self.repr_dim = config.embed_dim
@@ -1019,14 +984,8 @@ class InfoMaxJEPA(BaseModel):
         super().__init__(config)
         self.enc = Encoder(config)
         self.pred = Predictor(config)
-        self.optimizer = torch.optim.Adam(self.parameters(), lr=config.learning_rate)
-
-        self.scheduler = OneCycleLR(
-            self.optimizer,
-            max_lr=config.learning_rate,
-            steps_per_epoch=config.steps_per_epoch,
-            epochs=config.epochs,
-        )
+        self.optimizer = get_optimizer(config, self.parameters())
+        self.scheduler = get_scheduler(self.optimizer, config)
 
         self.config = config
         self.repr_dim = config.embed_dim
@@ -1141,15 +1100,8 @@ class ActionRegularizationJEPA(BaseModel):
             nn.Linear(config.action_reg_hidden_dim, config.action_dim),
         )  # Small network for action prediction from embedding differences
 
-        self.optimizer = torch.optim.Adam(self.parameters(), lr=config.learning_rate)
-        self.scheduler = OneCycleLR(
-            self.optimizer,
-            max_lr=config.learning_rate,
-            steps_per_epoch=config.steps_per_epoch,
-            epochs=config.epochs,
-            pct_start=0.05,
-            anneal_strategy="cos",
-        )
+        self.optimizer = get_optimizer(config, self.parameters())
+        self.scheduler = get_scheduler(self.optimizer, config)
 
         self.config = config
         self.repr_dim = config.embed_dim
@@ -1541,15 +1493,8 @@ class ActionRegularizationJEPA2D(BaseModel):
         self.pred = Predictor2D(config)
         self.action_reg_net = ActionRegularizer2D(config.embed_dim, config.action_dim)  # Small network for action prediction from embedding differences
 
-        self.optimizer = torch.optim.Adam(self.parameters(), lr=config.learning_rate)
-        self.scheduler = OneCycleLR(
-            self.optimizer,
-            max_lr=config.learning_rate,
-            steps_per_epoch=config.steps_per_epoch,
-            epochs=config.epochs,
-            pct_start=0.05,
-            anneal_strategy="cos",
-        )
+        self.optimizer = get_optimizer(config, self.parameters())
+        self.scheduler = get_scheduler(self.optimizer, config)
 
         self.config = config
         self.repr_dim = config.embed_dim
