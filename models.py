@@ -1805,7 +1805,7 @@ class ActionRegularizationJEPA2D(BaseModel):
         learning_rate = self.optimizer.param_groups[0]["lr"]
 
         # Compute the absolute value of the action weights
-        action_weight = self.pred.action_proj.weight  # Project action weights
+        action_weight = self.pred.action_proj[0].weight  # Project action weights
         action_weight_abs = action_weight.abs().mean().item()
 
         # Compute deviation from identity for fc layer
@@ -2065,7 +2065,7 @@ class ActionRegularizationJEPA2DVICReg(BaseModel):
         learning_rate = self.optimizer.param_groups[0]["lr"]
 
         # Compute the absolute value of the action weights
-        action_weight = self.pred.action_proj.weight  # Project action weights
+        action_weight = self.pred.action_proj[0].weight  # Project action weights
         action_weight_abs = action_weight.abs().mean().item()
 
         # Compute deviation from identity for fc layer
@@ -2111,7 +2111,7 @@ class ActionRegularizationJEPA2DVICReg(BaseModel):
         learning_rate = self.optimizer.param_groups[0]["lr"]
 
         # Compute the absolute value of the action weights
-        action_weight = self.pred.action_proj.weight  # Project action weights
+        action_weight = self.pred.action_proj[0].weight  # Project action weights
         action_weight_abs = action_weight.abs().mean().item()
 
         # Compute deviation from identity for fc layer
