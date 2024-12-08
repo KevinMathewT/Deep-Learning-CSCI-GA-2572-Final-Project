@@ -143,4 +143,5 @@ class JEPAConfig(ConfigBase):
     action_reg_hidden_dim: str = '32'
     lambda_reg: int = 0.2
     delta_gen: int = 1
+    encoder_backbone: str = "resnet18.a1_in1k"
     # You can add more configuration parameters as needed

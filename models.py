@@ -4,6 +4,7 @@ import numpy as np
 from torch import nn
 from torch.nn import functional as F
 import torch
+import timm
 
 from optimizer import get_optimizer, get_scheduler
 
@@ -1748,6 +1749,318 @@ class ActionRegularizationJEPA2D(BaseModel):
         return output
 
 
+class FlexibleEncoder2D(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+        self.repr_dim = config.embed_dim
+
+        # Ensure output size is consistent
+        self.output_side = int(math.sqrt(self.repr_dim))  # Should be 16 for config.embed_dim=256
+        # if self.output_side != 16:
+        #     raise ValueError("Output side must be 16 for config.embed_dim=256.")
+
+        # Dynamically select backbone based on config.encoder_backbone
+        self.backbone = timm.create_model(
+            config.encoder_backbone,  # Example: 'resnet18.a1_in1k'
+            pretrained=False,  # No pretraining allowed
+            num_classes=0,  # No classifier head
+            in_chans=2,  # Input has 2 channels
+            features_only=True,  # Extract spatial features
+        )
+
+        # Inspect available feature maps
+        self.feature_channels = [info['num_chs'] for info in self.backbone.feature_info]
+        self.feature_shapes = [info['reduction'] for info in self.backbone.feature_info]  # Spatial size reductions
+
+        # Select the layer closest to 16x16
+        self.closest_layer_index = self._find_closest_layer()
+
+        # Final adjustment to 16x16
+        self.adjust_to_target = nn.Sequential(
+            nn.Conv2d(self.feature_channels[self.closest_layer_index], 64, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(64, 1, kernel_size=3, stride=1, padding=1)
+        )
+
+    def _find_closest_layer(self):
+        # Find the layer whose spatial size is closest to output_side
+        input_size = 65  # Assumes input spatial dimensions (H, W) = 65x65
+        reductions = [input_size // red for red in self.feature_shapes]
+        closest_index = min(range(len(reductions)), key=lambda i: abs(reductions[i] - self.output_side))
+        return closest_index
+
+    def forward(self, x):
+        # Pass input through the backbone and select the appropriate layer
+        features = self.backbone(x)
+        x = features[self.closest_layer_index]  # Closest layer to 16x16
+
+        # Adjust to target shape
+        x = self.adjust_to_target(x)
+        return x
+
+
+class ActionRegularizationJEPA2DFlexibleEncoder(BaseModel):
+    def __init__(self, config):
+        super().__init__(config)
+        self.enc = FlexibleEncoder2D(config)
+        self.pred = Predictor2D(config)
+        self.action_reg_net = ActionRegularizer2D(config.embed_dim, config.action_dim)  # Small network for action prediction from embedding differences
+
+        self.optimizer = get_optimizer(config, self.parameters())
+        self.scheduler = get_scheduler(self.optimizer, config)
+
+        self.config = config
+        self.repr_dim = config.embed_dim
+
+    def forward(self, states, actions, teacher_forcing=True):
+        B, _, C, H, W = states.shape  # states: (B, T, C, H, W)
+        T = actions.shape[1] + 1  # Number of timesteps | actions: (B, T-1, action_dim)
+
+        if teacher_forcing:
+            states = states.view(B * T, C, H, W)  # Reshape to (B*T, C, H, W)
+
+            enc_states = self.enc(states)  # (B*T, 1, H', W')
+            _, _, H_out, W_out = enc_states.shape
+            enc_states = enc_states.view(B, T, 1, H_out, W_out)  # (B, T, 1, H', W')
+            preds = torch.zeros_like(enc_states)  # preds: (B, T, 1, H', W')
+            preds[:, 0, :, :, :] = enc_states[:, 0, :, :, :]  # Initialize first timestep
+
+            # Prepare inputs for the predictor
+            states_embed = enc_states[:, :-1, :, :, :]  # (B, T-1, 1, H', W')
+            states_embed = states_embed.contiguous().view(-1, 1, H_out, W_out)  # (B*(T-1), 1, H', W')
+            actions = actions.view(-1, self.config.action_dim)  # (B*(T-1), action_dim)
+
+            pred_states = self.pred(states_embed, actions)  # (B*(T-1), 1, H', W')
+            pred_states = pred_states.view(B, T - 1, 1, H_out, W_out)  # (B, T-1, 1, H', W')
+            preds[:, 1:, :, :, :] = pred_states  # Assign predictions to preds
+
+            return preds, enc_states  # preds: (B, T, 1, H', W'), enc_states: (B, T, 1, H', W')
+
+        else:
+            states_0 = states[:, 0, :, :, :]  # (B, C, H, W)
+            enc_state = self.enc(states_0)  # (B, 1, H', W')
+            preds = [enc_state]  # List to store predictions
+
+            for t in range(1, T):
+                action_t_minus1 = actions[:, t - 1, :]  # (B, action_dim)
+                state_embed_t_minus1 = preds[-1]  # Use the last predicted embedding (B, 1, H', W')
+                pred_state = self.pred(state_embed_t_minus1, action_t_minus1)  # (B, 1, H', W')
+                preds.append(pred_state)
+
+            # Stack predictions and true encodings along the time dimension
+            preds = torch.stack(preds, dim=1)  # (B, T, 1, H', W')
+            preds = preds.view(B, T, -1)  # (B, T, H'*W')
+            return preds
+
+    def compute_mse_loss(self, preds, enc_s):
+        # preds, enc_s: (B, T, 1, H', W') 
+        loss = F.mse_loss(
+            preds[:, 1:], enc_s[:, 1:]
+        )  # Compute MSE loss for timesteps 1 to T-1
+        return loss
+
+    def compute_regularization_loss(self, states_embed, pred_states, actions):
+        """
+        Computes the regularization loss based on the embedding difference and actions.
+        """
+        # states_embed and pred_states: (B*(T-1), 1, H', W')
+        # actions: (B*(T-1), action_dim)
+        # Predict actions from embedding differences
+        predicted_actions = self.action_reg_net(states_embed, pred_states)  # (B*(T-1), action_dim)
+
+        # Compute MSE loss between predicted and actual actions
+        reg_loss = F.mse_loss(predicted_actions, actions)
+        return reg_loss
+
+    def compute_vicreg_loss(self, preds, enc_s, gamma=1.0, epsilon=1e-4):
+        """
+        Compute VICReg loss with invariance, variance, and covariance terms.
+
+        Args:
+            preds: Predicted embeddings from the predictor. Shape (B, T, 1, H', W').
+            enc_s: Target embeddings from the encoder. Shape (B, T, 1, H', W').
+            gamma: Target standard deviation for variance term.
+            epsilon: Small value to avoid numerical instability.
+
+        Returns:
+            vicreg_loss: The combined VICReg loss.
+        """
+
+        # taking from config
+        lambda_invariance = self.config.vicreg_loss.lambda_invariance
+        mu_variance = self.config.vicreg_loss.mu_variance
+        nu_covariance = self.config.vicreg_loss.nu_covariance
+
+        preds, enc_s = preds[:, 1:], enc_s[:, 1:]  # Drop the first timestep
+
+        # Flatten spatial and temporal dimensions for batch processing
+        B, T, _, H, W = preds.shape
+        embed_dim = H * W
+        Z = preds.reshape(B * T, embed_dim)  # Predicted embeddings
+        Z_prime = enc_s.reshape(B * T, embed_dim)  # Target embeddings
+
+        # --- Invariance Term ---
+        invariance_loss = torch.mean(
+            torch.sum((Z - Z_prime) ** 2, dim=1)
+        )  # Mean squared Euclidean distance
+
+        # --- Variance Term ---
+        # Compute standard deviation along the batch dimension
+        std_Z = torch.sqrt(Z.var(dim=0, unbiased=False) + epsilon)
+        std_Z_prime = torch.sqrt(Z_prime.var(dim=0, unbiased=False) + epsilon)
+
+        variance_loss = torch.mean(F.relu(gamma - std_Z)) + torch.mean(
+            F.relu(gamma - std_Z_prime)
+        )
+
+        # --- Covariance Term ---
+        # Center the embeddings
+        Z_centered = Z - Z.mean(dim=0, keepdim=True)
+        Z_prime_centered = Z_prime - Z_prime.mean(dim=0, keepdim=True)
+
+        # Compute covariance matrices
+        cov_Z = (Z_centered.T @ Z_centered) / (B * T - 1)
+        cov_Z_prime = (Z_prime_centered.T @ Z_prime_centered) / (B * T - 1)
+
+        # Sum of squared off-diagonal elements
+        cov_loss_Z = torch.sum(cov_Z**2) - torch.sum(torch.diag(cov_Z) ** 2)
+        cov_loss_Z_prime = torch.sum(cov_Z_prime**2) - torch.sum(
+            torch.diag(cov_Z_prime) ** 2
+        )
+
+        covariance_loss = cov_loss_Z + cov_loss_Z_prime
+
+        # --- Total VICReg Loss ---
+        vicreg_loss = (
+            lambda_invariance * invariance_loss
+            + mu_variance * variance_loss
+            + nu_covariance * covariance_loss
+        )
+
+        return vicreg_loss, invariance_loss, variance_loss, covariance_loss
+
+    def training_step(self, batch, device):
+        states, actions = batch.states.to(device, non_blocking=True), batch.actions.to(
+            device, non_blocking=True
+        )
+        preds, enc_s = self.forward(states, actions)  # preds, enc_s: (B, T, 1, H, W)
+
+        # Compute regularization loss
+        B, T, _, H, W = enc_s.shape  # (B, T, 1, H, W)
+        states_embed = enc_s[:, :-1, :, :, :].reshape(
+            -1, 1, H, W
+        )  # Input to predictor: (B*(T-1), 1, H, W)
+        pred_states = preds[:, 1:, :, :, :].reshape(
+            -1, 1, H, W
+        )  # Output of predictor: (B*(T-1), 1, H, W)
+        actions = actions.reshape(-1, self.config.action_dim)  # Actions: (B*(T-1), action_dim)
+
+        action_reg_loss = self.compute_regularization_loss(
+            states_embed, pred_states, actions
+        )  # Uses ActionRegularizer2D internally
+
+        # Compute VICReg Loss
+        vic_reg_loss, invariance_loss, variance_loss, covariance_loss = (
+            self.compute_vicreg_loss(preds, enc_s)
+        )  # VICReg Loss Calculation
+
+        # Combine losses
+        total_loss = vic_reg_loss + self.config.lambda_reg * action_reg_loss
+
+        self.optimizer.zero_grad()
+        total_loss.backward()
+
+        # Compute grad_norm without clipping
+        grad_norm = 0.0
+        for p in self.parameters():
+            if p.grad is not None:
+                param_norm = p.grad.data.norm(2)
+                grad_norm += param_norm.item() ** 2
+        grad_norm = grad_norm**0.5
+
+        self.optimizer.step()
+        self.scheduler.step()  # Step the scheduler
+
+        learning_rate = self.optimizer.param_groups[0]["lr"]
+
+        # Compute the absolute value of the action weights
+        action_weight = self.pred.action_proj.weight  # Project action weights
+        action_weight_abs = action_weight.abs().mean().item()
+
+        # Compute deviation from identity for fc layer
+        # fc_weight = self.pred.fc[1].weight  # Get the weights of the Linear layer inside fc
+        # identity_matrix = torch.eye(fc_weight.size(0), fc_weight.size(1)).to(
+        #     fc_weight.device
+        # )
+        # deviation_from_identity = torch.norm(
+        #     fc_weight - identity_matrix, p="fro"
+        # ) / torch.norm(identity_matrix, p="fro")
+
+        # Prepare the output dictionary
+        output = {
+            "loss": total_loss.item(),
+            "grad_norm": grad_norm,
+            "learning_rate": learning_rate,
+            "action_weight_abs": action_weight_abs,
+            # "deviation_from_identity_pred_final_proj": deviation_from_identity.item(),
+            "action_reg_loss": action_reg_loss.item(),
+            "invariance_loss": invariance_loss,
+            "variance_loss": variance_loss,
+            "covariance_loss": covariance_loss,
+        }
+
+        # Non-loggable data
+        output["non_logs"] = {
+            "states": states.detach(),
+            "actions": actions.detach(),
+            "enc_embeddings": enc_s.detach(),
+            "pred_embeddings": preds.detach(),
+        }
+
+        return output
+
+    def validation_step(self, batch):
+        states, actions = batch.states, batch.actions
+        preds, enc_s = self.forward(states, actions)  # preds, enc_s: (B, T, 1, H, W)
+
+        # Compute MSE Loss
+        loss = self.compute_mse_loss(preds, enc_s)  # preds, enc_s: (B, T, 1, H, W)
+
+        # Learning rate
+        learning_rate = self.optimizer.param_groups[0]["lr"]
+
+        # Compute the absolute value of the action weights
+        action_weight = self.pred.action_proj.weight  # Project action weights
+        action_weight_abs = action_weight.abs().mean().item()
+
+        # Compute deviation from identity for fc layer
+        # fc_weight = self.pred.fc[1].weight  # Get the weights of the Linear layer inside fc
+        # identity_matrix = torch.eye(fc_weight.size(0), fc_weight.size(1)).to(
+        #     fc_weight.device
+        # )
+        # deviation_from_identity = torch.norm(
+        #     fc_weight - identity_matrix, p="fro"
+        # ) / torch.norm(identity_matrix, p="fro")
+
+        # Prepare the output dictionary
+        output = {
+            "loss": loss.item(),
+            "learning_rate": learning_rate,
+            "action_weight_abs": action_weight_abs,
+            # "deviation_from_identity_pred_final_proj": deviation_from_identity.item(),  # Log the deviation
+        }
+
+        # Non-loggable data
+        output["non_logs"] = {
+            "states": states.detach(),
+            "actions": actions.detach(),
+            "enc_embeddings": enc_s.detach(),
+            "pred_embeddings": preds.detach(),
+        }
+
+        return output
+    
 
 # Model mapping and get_model function
 MODEL_MAP: Dict[str, BaseModel] = {
@@ -1757,6 +2070,7 @@ MODEL_MAP: Dict[str, BaseModel] = {
     "ActionRegularizationJEPA": ActionRegularizationJEPA,
     "AdversarialJEPAWithRegularization": AdversarialJEPAWithRegularization,
     "ActionRegularizationJEPA2D": ActionRegularizationJEPA2D,
+    "ActionRegularizationJEPA2DFlexibleEncoder": ActionRegularizationJEPA2DFlexibleEncoder,
     # Add more models here as needed
 }
 
