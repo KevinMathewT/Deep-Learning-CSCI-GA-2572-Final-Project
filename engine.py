@@ -74,9 +74,8 @@ def train_one_epoch(
             acc.print(f"[{epoch + 1}/{config.epochs}] valid epoch loss: {val_loss:.5f}")
             acc.print(f"\n---------------------------------------\n")
             model.train()
-
-        losses_dict = {}
-        if ((epoch + 1) % 1 == 0) and ((i + 1) % (len(tdl) // l) == 0):
+        
+        if (i + 1) % (len(tdl) // l) == 0:
             acc.print(f"------ Running Probing Evaluator for epoch {epoch + 1} ------")
             # Evaluate the model using the probing evaluator
             avg_losses = evaluate_model(acc.device, model, probe_train_ds, probe_val_ds)
@@ -103,12 +102,11 @@ def train_one_epoch(
 
             acc.print(f"-------------------------------------------------------------")
 
-            losses_dict.update(avg_losses)
+    avg_epoch_loss = total_loss / len(tdl)
+    avg_losses.update({"avg_epoch_train_loss": avg_epoch_loss, "epoch": epoch + 1})
 
     # Log avg_epoch_train_loss at the end of the epoch
-    avg_epoch_loss = total_loss / len(tdl)
-    losses_dict.update({"avg_epoch_train_loss": avg_epoch_loss, "epoch": epoch + 1})
-    wandb.log(losses_dict, step=step)
+    wandb.log(avg_losses, step=step)
 
     return step, avg_epoch_loss
 
