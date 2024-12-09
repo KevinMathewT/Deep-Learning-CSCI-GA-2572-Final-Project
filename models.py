@@ -2145,6 +2145,268 @@ class ActionRegularizationJEPA2DFlexibleEncoder(BaseModel):
         return output
     
 
+import math
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from timm import create_model
+
+# Explanation:
+# This class replaces the original `Encoder` class.
+# Instead of the downsampling convolutional approach shown in the sample,
+# we directly use the resnet18 with features_only=True as done originally.
+# The shape handling remains the same: input is (B,T,2,H,W),
+# we flatten to (B*T,2,H,W), run through ResNet, take the feature map at index [1],
+# and then reshape back to (B,T,C,H',W').
+class Encoder2D(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+        # Use the same backbone as original code
+        self.resnet = create_model(
+            'resnet18.a1_in1k', 
+            pretrained=False, 
+            num_classes=0, 
+            in_chans=2, 
+            features_only=True
+        )
+
+    def forward(self, x):
+        # x: (B, T, 2, H, W)
+        B, T, C, H, W = x.shape
+        x = x.view(B*T, C, H, W)  # Flatten time into batch
+        features = self.resnet(x)[1]  # As in original code, take index [1]
+        # Suppose features: (B*T, C', H', W')
+        C_out = features.shape[1]
+        H_out = features.shape[2]
+        W_out = features.shape[3]
+
+        features = features.view(B, T, C_out, H_out, W_out)
+        return features  # (B, T, C_out, H_out, W_out)
+
+
+# Explanation:
+# This class replaces the original `Predictor` class.
+# We keep the exact predictor architecture and logic from above.
+# The original code sets `Predictor(input_dim=66, output_dim=64)` after obtaining features from the encoder.
+# Input: concatenation of state embedding (64 channels from resnet) + action (2 channels) = 66 channels.
+# Output: reduce to 64 channels.
+class Predictor2D(nn.Module):
+    def __init__(self, input_dim=66, output_dim=64):
+        super().__init__()
+        self.predictor = nn.Sequential(
+            nn.Conv2d(input_dim, input_dim - 2, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(input_dim - 2, output_dim, kernel_size=3, padding=1)
+        )
+
+    def forward(self, encoded_o_t, action):
+        # encoded_o_t: (B, T, C, H', W')
+        # action: (B, T-1, 2)
+        B, T, C, H, W = encoded_o_t.shape
+
+        # Reshape action
+        action = action.view(B, T-1, 2, 1, 1)
+        action = action.repeat(1, 1, 1, H, W)  # (B, T-1, 2, H, W)
+
+        predictions = []
+        for t in range(T - 1):
+            # Concatenate current encoded state with action along channel dim
+            x = torch.cat([encoded_o_t[:, t], action[:, t]], dim=1)  # (B, C+2, H, W)
+            pred = self.predictor(x)  # (B, output_dim, H, W)
+            predictions.append(pred)
+
+        # Stack predictions along time
+        return torch.stack(predictions, dim=1)  # (B, T-1, output_dim, H, W)
+
+
+# Explanation:
+# The original code does not do action regression from embedding differences.
+# The provided template has an `ActionRegularizer2D` class and 
+# mentions predicting actions from state differences, but the original code does not have this.
+# To maintain the requested format, we'll define this class but not use it.
+class ActionRegularizer2D(nn.Module):
+    def __init__(self, config, embed_dim, action_dim):
+        super().__init__()
+        # Not used, as original code does not do action regression
+        pass
+
+    def forward(self, states_embed, pred_states):
+        # Return zero since original code does not do this step
+        return torch.zeros(states_embed.size(0), 2, device=states_embed.device)
+
+
+# Explanation:
+# We now combine everything into the `ActionRegularizationJEPA2D` class.
+# Instead of the downsampling logic in the provided code snippet, we directly use
+# our `Encoder2D` (which uses ResNet) and `Predictor2D` (our ConvNet) from above.
+# We incorporate the VICReg computations exactly as in the original code:
+#   inv-loss (MSE), var-loss (thresholded standard deviation), cov-loss (off-diagonal covariance).
+# We'll run the forward pass, predict next states, flatten as in the original training loop,
+# compute the VICReg losses at spatial and global scales, and return the metrics.
+#
+# The original code:
+# - Encodes states
+# - Predicts next states
+# - Computes VICReg loss (inv, var, cov) both globally and spatially
+# - Combines them, and backprops.
+#
+# We'll do the same here in `training_step`.
+#
+# Note: We assume `BaseModel`, `get_optimizer`, `get_scheduler`, and `config` are defined elsewhere.
+from torch.optim import AdamW
+from torch.optim.lr_scheduler import OneCycleLR
+
+class ActionRegularizationJEPA2Dv2(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+        self.enc = Encoder2D(config)
+        self.pred = Predictor2D(input_dim=66, output_dim=64)  # Same as original code
+        # self.action_reg_net = ActionRegularizer2D(config, config.embed_dim, config.action_dim)  # Not used
+
+        # Create optimizer and scheduler as per original code
+        params = list(self.enc.parameters()) + list(self.pred.parameters())
+        self.optimizer = AdamW(params, lr=1e-3)
+        self.scheduler = OneCycleLR(self.optimizer, max_lr=1e-2, steps_per_epoch=config.steps_per_epoch, epochs=config.epochs,)
+
+        # VICReg parameters from original code
+        self.inv_coeff = 25.0
+        self.var_coeff = 15.0
+        self.cov_coeff = 1.0
+        self.gamma = 1.0
+
+    def forward(self, states, actions):
+        # Forward pass as original code:
+        # states: (B, T, 2, H, W)
+        # actions: (B, T-1, 2)
+
+        # Encode all states
+        enc_states = self.enc(states)  # (B, T, C, H', W')
+
+        # Predict next states
+        predicted_next = self.pred(enc_states, actions)  # (B, T-1, C', H', W')
+        
+        return enc_states, predicted_next
+
+    def representation_loss(self, x, y):
+        # As original VICReg: MSE loss
+        return F.mse_loss(x, y)
+
+    def variance_loss(self, x, gamma):
+        x = x - x.mean(dim=0)
+        std = x.std(dim=0)
+        var_loss = F.relu(gamma - std).mean()
+        return var_loss
+
+    def covariance_loss(self, x):
+        x = x - x.mean(dim=0)
+        cov = (x.T @ x) / (x.shape[0] - 1)
+        cov.fill_diagonal_(0.0)
+        cov_loss = cov.pow(2).sum() / x.shape[1]
+        return cov_loss
+
+    def compute_vicreg_losses(self, predicted_next, target_encoded):
+        # Compute VICReg losses as in the original code
+        # predicted_next, target_encoded: after flattening appropriately
+
+        # invariance
+        inv_loss = self.inv_coeff * self.representation_loss(predicted_next, target_encoded)
+
+        # variance
+        var_loss_x = self.var_coeff * self.variance_loss(predicted_next, self.gamma)
+        var_loss_y = self.var_coeff * self.variance_loss(target_encoded, self.gamma)
+        var_loss = (var_loss_x + var_loss_y) / 2
+
+        # covariance
+        cov_loss_x = self.cov_coeff * self.covariance_loss(predicted_next)
+        cov_loss_y = self.cov_coeff * self.covariance_loss(target_encoded)
+        cov_loss = (cov_loss_x + cov_loss_y) / 2
+
+        loss = inv_loss + var_loss + cov_loss
+        return {
+            "loss": loss,
+            "inv-loss": inv_loss,
+            "var-loss": var_loss,
+            "cov-loss": cov_loss
+        }
+
+    def training_step(self, batch, device):
+        states, _, actions = batch
+        states = states.to(device)
+        actions = actions.to(device)
+
+        enc_states, predicted_next = self(states, actions)
+
+        # target_encoded = enc_states[:, 1:] (B, T-1, C, H', W')
+        target_encoded = enc_states[:, 1:]
+
+        # predicted_next: (B, T-1, C, H', W')
+        # For VICReg, we compute loss globally and also add a spatially-resolved term as in original code.
+
+        # Flatten for global VICReg:
+        B, Tm1, C, H, W = predicted_next.shape
+        # Flatten channels + spatial:
+        pred_global = predicted_next.flatten(start_dim=1, end_dim=-1)  # (B, (T-1)*C*H*W)
+        targ_global = target_encoded.flatten(start_dim=1, end_dim=-1)  # (B, (T-1)*C*H*W)
+
+        vicreg_global_metrics = self.compute_vicreg_losses(pred_global, targ_global)
+
+        # Spatial-level VICReg:
+        # Permute to treat each spatial location as a separate sample:
+        # predicted_next_spatial: (B*(T-1)*H*W, C)
+        predicted_next_spatial = predicted_next.permute(0,1,3,4,2).flatten(end_dim=-2)  # (B*(T-1)*H*W, C)
+        target_encoded_spatial = target_encoded.permute(0,1,3,4,2).flatten(end_dim=-2)  # (B*(T-1)*H*W, C)
+
+        vicreg_spatial_metrics = self.compute_vicreg_losses(predicted_next_spatial, target_encoded_spatial)
+
+        combined_loss = vicreg_global_metrics["loss"] + vicreg_spatial_metrics["loss"]
+
+        # Backprop
+        self.optimizer.zero_grad()
+        combined_loss.backward()
+        self.optimizer.step()
+        self.scheduler.step()
+
+        # Prepare metrics for logging
+        output = {
+            "loss": combined_loss.item(),
+            "inv_loss": (vicreg_global_metrics["inv-loss"].item() + vicreg_spatial_metrics["inv-loss"].item()),
+            "var_loss": (vicreg_global_metrics["var-loss"].item() + vicreg_spatial_metrics["var-loss"].item()),
+            "cov_loss": (vicreg_global_metrics["cov-loss"].item() + vicreg_spatial_metrics["cov-loss"].item()),
+            "lr": self.scheduler.get_last_lr()[0],
+        }
+
+        return output
+
+    def validation_step(self, batch, device):
+        states, _, actions = batch
+        states = states.to(device)
+        actions = actions.to(device)
+
+        enc_states, predicted_next = self(states, actions)
+        target_encoded = enc_states[:, 1:]
+
+        # Compute just the global VICReg loss for validation for simplicity
+        B, Tm1, C, H, W = predicted_next.shape
+        pred_global = predicted_next.flatten(start_dim=1, end_dim=-1)
+        targ_global = target_encoded.flatten(start_dim=1, end_dim=-1)
+
+        vicreg_metrics = self.compute_vicreg_losses(pred_global, targ_global)
+        val_loss = vicreg_metrics["loss"].item()
+
+        output = {
+            "val_loss": val_loss,
+            "inv_loss": vicreg_metrics["inv-loss"].item(),
+            "var_loss": vicreg_metrics["var-loss"].item(),
+            "cov_loss": vicreg_metrics["cov-loss"].item(),
+            "lr": self.scheduler.get_last_lr()[0],
+        }
+
+        return output
+
+
+
 # Model mapping and get_model function
 MODEL_MAP: Dict[str, BaseModel] = {
     "JEPA": JEPA,
