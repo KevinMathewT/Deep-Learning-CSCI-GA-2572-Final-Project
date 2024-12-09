@@ -2158,7 +2158,7 @@ from timm import create_model
 # The shape handling remains the same: input is (B,T,2,H,W),
 # we flatten to (B*T,2,H,W), run through ResNet, take the feature map at index [1],
 # and then reshape back to (B,T,C,H',W').
-class Encoder2D(nn.Module):
+class Encoder2Dv2(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
@@ -2191,7 +2191,7 @@ class Encoder2D(nn.Module):
 # The original code sets `Predictor(input_dim=66, output_dim=64)` after obtaining features from the encoder.
 # Input: concatenation of state embedding (64 channels from resnet) + action (2 channels) = 66 channels.
 # Output: reduce to 64 channels.
-class Predictor2D(nn.Module):
+class Predictor2Dv2(nn.Module):
     def __init__(self, input_dim=66, output_dim=64):
         super().__init__()
         self.predictor = nn.Sequential(
@@ -2225,7 +2225,7 @@ class Predictor2D(nn.Module):
 # The provided template has an `ActionRegularizer2D` class and 
 # mentions predicting actions from state differences, but the original code does not have this.
 # To maintain the requested format, we'll define this class but not use it.
-class ActionRegularizer2D(nn.Module):
+class ActionRegularizer2Dv2(nn.Module):
     def __init__(self, config, embed_dim, action_dim):
         super().__init__()
         # Not used, as original code does not do action regression
@@ -2261,8 +2261,8 @@ class ActionRegularizationJEPA2Dv2(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
-        self.enc = Encoder2D(config)
-        self.pred = Predictor2D(input_dim=66, output_dim=64)  # Same as original code
+        self.enc = Encoder2Dv2(config)
+        self.pred = Predictor2Dv2(input_dim=66, output_dim=64)  # Same as original code
         # self.action_reg_net = ActionRegularizer2D(config, config.embed_dim, config.action_dim)  # Not used
 
         # Create optimizer and scheduler as per original code
@@ -2277,54 +2277,54 @@ class ActionRegularizationJEPA2Dv2(nn.Module):
         self.gamma = 1.0
 
 
-def forward(self, states, actions, teacher_forcing=True):
-    B, T, C, H, W = states.shape  # states: (B, T, C, H, W)
-    T_actions = actions.shape[1]  # Number of actions is T-1
-    assert T == T_actions + 1, "Number of timesteps (T) should be actions+1."
+    def forward(self, states, actions, teacher_forcing=True):
+        B, T, C, H, W = states.shape  # states: (B, T, C, H, W)
+        T_actions = actions.shape[1]  # Number of actions is T-1
+        assert T == T_actions + 1, "Number of timesteps (T) should be actions+1."
 
-    if teacher_forcing:
-        # Teacher forcing mode
-        # Reshape states to process all at once
-        states_flat = states.view(B * T, C, H, W)  # (B*T, C, H, W)
-        enc_states = self.enc(states_flat)  # (B*T, out_c, H', W')
-        _, out_c, H_out, W_out = enc_states.shape
-        enc_states = enc_states.view(B, T, out_c, H_out, W_out)  # (B, T, out_c, H', W')
+        if teacher_forcing:
+            # Teacher forcing mode
+            # Reshape states to process all at once
+            states_flat = states.view(B * T, C, H, W)  # (B*T, C, H, W)
+            enc_states = self.enc(states_flat)  # (B*T, out_c, H', W')
+            _, out_c, H_out, W_out = enc_states.shape
+            enc_states = enc_states.view(B, T, out_c, H_out, W_out)  # (B, T, out_c, H', W')
 
-        # Initialize predictions array
-        preds = torch.zeros_like(enc_states)  # (B, T, out_c, H', W')
-        preds[:, 0] = enc_states[:, 0]  # First predicted state = first encoded state
+            # Initialize predictions array
+            preds = torch.zeros_like(enc_states)  # (B, T, out_c, H', W')
+            preds[:, 0] = enc_states[:, 0]  # First predicted state = first encoded state
 
-        # Prepare states and actions for the predictor
-        states_embed = enc_states[:, :-1, :, :, :]  # (B, T-1, out_c, H', W')
-        states_embed = states_embed.contiguous().view(-1, out_c, H_out, W_out)  # (B*(T-1), out_c, H', W')
-        actions_flat = actions.view(-1, self.config.action_dim)  # (B*(T-1), action_dim)
+            # Prepare states and actions for the predictor
+            states_embed = enc_states[:, :-1, :, :, :]  # (B, T-1, out_c, H', W')
+            states_embed = states_embed.contiguous().view(-1, out_c, H_out, W_out)  # (B*(T-1), out_c, H', W')
+            actions_flat = actions.view(-1, self.config.action_dim)  # (B*(T-1), action_dim)
 
-        # Predict future states using teacher forcing (true previous states)
-        pred_states = self.pred(states_embed, actions_flat)  # (B*(T-1), out_c, H', W')
-        pred_states = pred_states.view(B, T - 1, out_c, H_out, W_out)  # (B, T-1, out_c, H', W')
-        preds[:, 1:] = pred_states
+            # Predict future states using teacher forcing (true previous states)
+            pred_states = self.pred(states_embed, actions_flat)  # (B*(T-1), out_c, H', W')
+            pred_states = pred_states.view(B, T - 1, out_c, H_out, W_out)  # (B, T-1, out_c, H', W')
+            preds[:, 1:] = pred_states
 
-        return preds, enc_states  # (B, T, out_c, H', W'), (B, T, out_c, H', W')
+            return preds, enc_states  # (B, T, out_c, H', W'), (B, T, out_c, H', W')
 
-    else:
-        # Non-teacher forcing mode
-        # Encode the first state only
-        state_0 = states[:, 0]  # (B, C, H, W)
-        enc_state_0 = self.enc(state_0)  # (B, out_c, H', W')
-        preds = [enc_state_0]
+        else:
+            # Non-teacher forcing mode
+            # Encode the first state only
+            state_0 = states[:, 0]  # (B, C, H, W)
+            enc_state_0 = self.enc(state_0)  # (B, out_c, H', W')
+            preds = [enc_state_0]
 
-        # Predict subsequent states using previously predicted state
-        for t in range(1, T):
-            action_t_minus1 = actions[:, t - 1, :]  # (B, action_dim)
-            state_embed_t_minus1 = preds[-1]  # (B, out_c, H', W')
-            pred_state = self.pred(state_embed_t_minus1, action_t_minus1)  # (B, out_c, H', W')
-            preds.append(pred_state)
+            # Predict subsequent states using previously predicted state
+            for t in range(1, T):
+                action_t_minus1 = actions[:, t - 1, :]  # (B, action_dim)
+                state_embed_t_minus1 = preds[-1]  # (B, out_c, H', W')
+                pred_state = self.pred(state_embed_t_minus1, action_t_minus1)  # (B, out_c, H', W')
+                preds.append(pred_state)
 
-        # Stack predictions along the time dimension
-        preds = torch.stack(preds, dim=1)  # (B, T, out_c, H', W')
-        preds = preds.view(B, T, -1)  # (B, T, H'*W')
-        
-        return preds
+            # Stack predictions along the time dimension
+            preds = torch.stack(preds, dim=1)  # (B, T, out_c, H', W')
+            preds = preds.view(B, T, -1)  # (B, T, H'*W')
+            
+            return preds
 
 
     def representation_loss(self, x, y):
