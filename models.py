@@ -1796,7 +1796,7 @@ class FlexibleEncoder2D(nn.Module):
         x = features[self.closest_layer_index]  # Closest layer to 16x16
 
         # Adjust to target shape
-        x = self.adjust_to_target(x)
+        # x = self.adjust_to_target(x)
         return x
 
 
