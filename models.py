@@ -1439,9 +1439,9 @@ class Predictor2D(nn.Module):
         # For simplicity, we'll assume identity for state embedding
 
         self.conv = nn.Sequential(
-            nn.Conv2d(self.config.out_c, self.config.out_c + 1, kernel_size=3, stride=1, padding=1),  # Combine state and action
+            nn.Conv2d(self.config.out_c + 1, self.config.out_c, kernel_size=3, stride=1, padding=1),  # Combine state and action
             nn.ReLU(),
-            nn.Conv2d(self.config.out_c + 1, self.config.out_c, kernel_size=3, stride=1, padding=1),  # Reduce to single-channel
+            nn.Conv2d(self.config.out_c, self.config.out_c, kernel_size=3, stride=1, padding=1),  # Reduce to single-channel
             nn.ReLU(),
         )
 
