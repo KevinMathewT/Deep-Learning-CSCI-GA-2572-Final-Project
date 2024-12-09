@@ -1896,7 +1896,7 @@ class ActionRegularizationJEPA2DFlexibleEncoder(BaseModel):
 
         # Flatten spatial and temporal dimensions for batch processing
         B, T, _, H, W = preds.shape
-        embed_dim = H * W
+        embed_dim = H * W * self.config.out_c
         Z = preds.reshape(B * T, embed_dim)  # Predicted embeddings
         Z_prime = enc_s.reshape(B * T, embed_dim)  # Target embeddings
 
