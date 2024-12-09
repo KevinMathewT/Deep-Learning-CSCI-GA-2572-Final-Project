@@ -1822,17 +1822,17 @@ class ActionRegularizationJEPA2DFlexibleEncoder(BaseModel):
 
             enc_states = self.enc(states)  # (B*T, 1, H', W')
             _, _, H_out, W_out = enc_states.shape
-            enc_states = enc_states.view(B, T, 1, H_out, W_out)  # (B, T, 1, H', W')
+            enc_states = enc_states.view(B, T, self.config.out_c, H_out, W_out)  # (B, T, C, H', W')
             preds = torch.zeros_like(enc_states)  # preds: (B, T, 1, H', W')
             preds[:, 0, :, :, :] = enc_states[:, 0, :, :, :]  # Initialize first timestep
 
             # Prepare inputs for the predictor
             states_embed = enc_states[:, :-1, :, :, :]  # (B, T-1, 1, H', W')
-            states_embed = states_embed.contiguous().view(-1, 1, H_out, W_out)  # (B*(T-1), 1, H', W')
+            states_embed = states_embed.contiguous().view(-1, self.config.out_c, H_out, W_out)  # (B*(T-1), 1, H', W')
             actions = actions.view(-1, self.config.action_dim)  # (B*(T-1), action_dim)
 
             pred_states = self.pred(states_embed, actions)  # (B*(T-1), 1, H', W')
-            pred_states = pred_states.view(B, T - 1, 1, H_out, W_out)  # (B, T-1, 1, H', W')
+            pred_states = pred_states.view(B, T - 1, self.config.out_c, H_out, W_out)  # (B, T-1, 1, H', W')
             preds[:, 1:, :, :, :] = pred_states  # Assign predictions to preds
 
             return preds, enc_states  # preds: (B, T, 1, H', W'), enc_states: (B, T, 1, H', W')
