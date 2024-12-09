@@ -2278,53 +2278,57 @@ class ActionRegularizationJEPA2Dv2(nn.Module):
 
 
     def forward(self, states, actions, teacher_forcing=True):
-        B, T, C, H, W = states.shape  # states: (B, T, C, H, W)
-        T_actions = actions.shape[1]  # Number of actions is T-1
-        assert T == T_actions + 1, "Number of timesteps (T) should be actions+1."
+        # states: (B, T, 2, H, W)
+        # actions: (B, T-1, 2)
+        B, T, C, H, W = states.shape
+        # C should be 2 as per encoder input
 
         if teacher_forcing:
-            # Teacher forcing mode
-            # Reshape states to process all at once
-            states_flat = states.view(B * T, C, H, W)  # (B*T, C, H, W)
-            enc_states = self.enc(states_flat)  # (B*T, out_c, H', W')
-            _, out_c, H_out, W_out = enc_states.shape
-            enc_states = enc_states.view(B, T, out_c, H_out, W_out)  # (B, T, out_c, H', W')
+            # Pass states directly to encoder; it handles flattening internally.
+            enc_states = self.enc(states)  # (B, T, C_out, H_out, W_out)
+            # Initialize predictions (same shape as enc_states)
+            preds = torch.zeros_like(enc_states)  # (B, T, C_out, H_out, W_out)
+            preds[:, 0] = enc_states[:, 0]  # First predicted state is the first encoded state
 
-            # Initialize predictions array
-            preds = torch.zeros_like(enc_states)  # (B, T, out_c, H', W')
-            preds[:, 0] = enc_states[:, 0]  # First predicted state = first encoded state
+            # Use predictor to predict next states
+            # The predictor expects:
+            #   enc_states: (B, T, C_out, H_out, W_out)
+            #   actions: (B, T-1, 2)
+            # returns: (B, T-1, output_dim, H_out, W_out)
+            pred_states = self.pred(enc_states, actions)
 
-            # Prepare states and actions for the predictor
-            states_embed = enc_states[:, :-1, :, :, :]  # (B, T-1, out_c, H', W')
-            states_embed = states_embed.contiguous().view(-1, out_c, H_out, W_out)  # (B*(T-1), out_c, H', W')
-            actions_flat = actions.view(-1, self.config.action_dim)  # (B*(T-1), action_dim)
-
-            # Predict future states using teacher forcing (true previous states)
-            pred_states = self.pred(states_embed, actions_flat)  # (B*(T-1), out_c, H', W')
-            pred_states = pred_states.view(B, T - 1, out_c, H_out, W_out)  # (B, T-1, out_c, H', W')
+            # Assign predicted states to preds at t=1 to T-1
             preds[:, 1:] = pred_states
 
-            return preds, enc_states  # (B, T, out_c, H', W'), (B, T, out_c, H', W')
+            return preds, enc_states
 
         else:
-            # Non-teacher forcing mode
-            # Encode the first state only
-            state_0 = states[:, 0]  # (B, C, H, W)
-            enc_state_0 = self.enc(state_0)  # (B, out_c, H', W')
-            preds = [enc_state_0]
+            # Non-teacher forcing scenario:
+            # Take the first state only
+            states_0 = states[:, 0]  # (B, 2, H, W)
+            # Encoder expects (B, T, 2, H, W), so add a time dimension for a single step
+            enc_state = self.enc(states_0.unsqueeze(1))  # (B, 1, C_out, H_out, W_out)
+            
+            preds = [enc_state]
 
-            # Predict subsequent states using previously predicted state
+            # Predict step by step for remaining timesteps
             for t in range(1, T):
-                action_t_minus1 = actions[:, t - 1, :]  # (B, action_dim)
-                state_embed_t_minus1 = preds[-1]  # (B, out_c, H', W')
-                pred_state = self.pred(state_embed_t_minus1, action_t_minus1)  # (B, out_c, H', W')
+                action_t_minus1 = actions[:, t - 1]  # (B, 2)
+                state_embed_t_minus1 = preds[-1]  # (B, 1, C_out, H_out, W_out)
+
+                # The predictor expects a sequence along T, but we have only one timestep to predict.
+                # We'll just pass a single-step sequence (T=1):
+                # actions also need a time dimension: (B,1,2)
+                pred_state = self.pred(state_embed_t_minus1, action_t_minus1.unsqueeze(1))  
+                # pred_state: (B, 1, C_out, H_out, W_out)
+
                 preds.append(pred_state)
 
-            # Stack predictions along the time dimension
-            preds = torch.stack(preds, dim=1)  # (B, T, out_c, H', W')
-            preds = preds.view(B, T, -1)  # (B, T, H'*W')
-            
+            # Stack predictions: (B, T, C_out, H_out, W_out)
+            preds = torch.cat(preds, dim=1)
+            preds = preds.view(B, T, -1)  # (B, T, C_out*H_out*W_out)
             return preds
+
 
 
     def representation_loss(self, x, y):
@@ -2374,7 +2378,7 @@ class ActionRegularizationJEPA2Dv2(nn.Module):
         states = states.to(device)
         actions = actions.to(device)
 
-        enc_states, predicted_next = self(states, actions)
+        predicted_next, enc_states = self(states, actions)
 
         # target_encoded = enc_states[:, 1:] (B, T-1, C, H', W')
         target_encoded = enc_states[:, 1:]
