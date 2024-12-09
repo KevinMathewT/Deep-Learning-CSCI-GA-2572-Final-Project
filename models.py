@@ -1382,10 +1382,10 @@ class Encoder2D(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
-        self.repr_dim = config.embed_dim
+        self.repr_dim = config.embed_dim * config.out_c
 
         _input_size = 65
-        self.output_side = int(math.sqrt(self.repr_dim))  # Calculate the side of the 2D embedding
+        self.output_side = int(math.sqrt(self.repr_dim / config.out_c))  # Calculate the side of the 2D embedding
         # Determine the number of convolutional blocks required
         self.num_conv_blocks = int(math.log2(_input_size / self.output_side))
         if 2 ** self.num_conv_blocks * self.output_side != 2 ** int(math.log2(_input_size)):
@@ -1430,8 +1430,8 @@ class Predictor2D(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
-        self.repr_dim = config.embed_dim
-        self.output_side = int(math.sqrt(self.repr_dim))  # Calculate 2D embedding dimensions
+        self.repr_dim = config.embed_dim * config.out_c
+        self.output_side = int(math.sqrt(self.repr_dim / config.out_c))  # Calculate 2D embedding dimensions
 
         self.action_proj = nn.Linear(self.config.action_dim, self.output_side ** 2)  # Project action to repr_dim
         # Optionally, you can add a projection for the state embedding
@@ -1498,7 +1498,7 @@ class ActionRegularizationJEPA2D(BaseModel):
         self.scheduler = get_scheduler(self.optimizer, config)
 
         self.config = config
-        self.repr_dim = config.embed_dim
+        self.repr_dim = config.embed_dim * config.out_c
 
     def forward(self, states, actions, teacher_forcing=True):
         B, _, C, H, W = states.shape  # states: (B, T, C, H, W)
@@ -1753,10 +1753,10 @@ class FlexibleEncoder2D(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
-        self.repr_dim = config.embed_dim
+        self.repr_dim = config.embed_dim * config.out_c
 
         # Ensure output size is consistent
-        self.output_side = int(math.sqrt(self.repr_dim))  # Should be 16 for config.embed_dim=256
+        self.output_side = int(math.sqrt(self.repr_dim / config.out_c))  # Should be 16 for config.embed_dim=256
         # if self.output_side != 16:
         #     raise ValueError("Output side must be 16 for config.embed_dim=256.")
 
@@ -1811,7 +1811,7 @@ class ActionRegularizationJEPA2DFlexibleEncoder(BaseModel):
         self.scheduler = get_scheduler(self.optimizer, config)
 
         self.config = config
-        self.repr_dim = config.embed_dim
+        self.repr_dim = config.embed_dim * config.out_c
 
     def forward(self, states, actions, teacher_forcing=True):
         B, _, C, H, W = states.shape  # states: (B, T, C, H, W)
