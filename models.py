@@ -1949,10 +1949,10 @@ class ActionRegularizationJEPA2DFlexibleEncoder(BaseModel):
         # Compute regularization loss
         B, T, _, H, W = enc_s.shape  # (B, T, 1, H, W)
         states_embed = enc_s[:, :-1, :, :, :].reshape(
-            -1, 1, H, W
+            -1, self.config.out_c, H, W
         )  # Input to predictor: (B*(T-1), 1, H, W)
         pred_states = preds[:, 1:, :, :, :].reshape(
-            -1, 1, H, W
+            -1, self.config.out_c, H, W
         )  # Output of predictor: (B*(T-1), 1, H, W)
         actions = actions.reshape(-1, self.config.action_dim)  # Actions: (B*(T-1), action_dim)
 
