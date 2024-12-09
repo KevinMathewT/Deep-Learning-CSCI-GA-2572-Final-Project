@@ -1439,9 +1439,9 @@ class Predictor2D(nn.Module):
         # For simplicity, we'll assume identity for state embedding
 
         self.conv = nn.Sequential(
-            nn.Conv2d(2, 32, kernel_size=3, stride=1, padding=1),  # Combine state and action
+            nn.Conv2d(self.config.out_c, self.config.out_c + 1, kernel_size=3, stride=1, padding=1),  # Combine state and action
             nn.ReLU(),
-            nn.Conv2d(32, 1, kernel_size=3, stride=1, padding=1),  # Reduce to single-channel
+            nn.Conv2d(self.config.out_c + 1, self.config.out_c, kernel_size=3, stride=1, padding=1),  # Reduce to single-channel
             nn.ReLU(),
         )
 
@@ -1458,11 +1458,11 @@ class Predictor2D(nn.Module):
     
 
 class ActionRegularizer2D(nn.Module):
-    def __init__(self, embed_dim, action_dim):
+    def __init__(self, config, embed_dim, action_dim):
         super().__init__()
         self.output_side = int(math.sqrt(embed_dim))  # Calculate the side of the 2D embedding
         self.action_reg_net = nn.Sequential(
-            nn.Conv2d(1, 16, kernel_size=3, padding=1),  # 2D conv layer
+            nn.Conv2d(config.out_c, 16, kernel_size=3, padding=1),  # 2D conv layer
             nn.ReLU(),
             nn.Conv2d(16, 1, kernel_size=3, padding=1),  # Output single channel
             nn.Flatten(),  # Flatten to prepare for linear mapping
@@ -1492,7 +1492,7 @@ class ActionRegularizationJEPA2D(BaseModel):
         super().__init__(config)
         self.enc = Encoder2D(config)
         self.pred = Predictor2D(config)
-        self.action_reg_net = ActionRegularizer2D(config.embed_dim, config.action_dim)  # Small network for action prediction from embedding differences
+        self.action_reg_net = ActionRegularizer2D(config, config.embed_dim, config.action_dim)  # Small network for action prediction from embedding differences
 
         self.optimizer = get_optimizer(config, self.parameters())
         self.scheduler = get_scheduler(self.optimizer, config)
@@ -1777,11 +1777,11 @@ class FlexibleEncoder2D(nn.Module):
         self.closest_layer_index = self._find_closest_layer()
 
         # Final adjustment to 16x16
-        self.adjust_to_target = nn.Sequential(
-            nn.Conv2d(self.feature_channels[self.closest_layer_index], 64, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(),
-            nn.Conv2d(64, 1, kernel_size=3, stride=1, padding=1)
-        )
+        # self.adjust_to_target = nn.Sequential(
+        #     nn.Conv2d(self.feature_channels[self.closest_layer_index], 64, kernel_size=3, stride=1, padding=1),
+        #     nn.ReLU(),
+        #     nn.Conv2d(64, 1, kernel_size=3, stride=1, padding=1)
+        # )
 
     def _find_closest_layer(self):
         # Find the layer whose spatial size is closest to output_side
@@ -1805,7 +1805,7 @@ class ActionRegularizationJEPA2DFlexibleEncoder(BaseModel):
         super().__init__(config)
         self.enc = FlexibleEncoder2D(config)
         self.pred = Predictor2D(config)
-        self.action_reg_net = ActionRegularizer2D(config.embed_dim, config.action_dim)  # Small network for action prediction from embedding differences
+        self.action_reg_net = ActionRegularizer2D(config, config.embed_dim, config.action_dim)  # Small network for action prediction from embedding differences
 
         self.optimizer = get_optimizer(config, self.parameters())
         self.scheduler = get_scheduler(self.optimizer, config)

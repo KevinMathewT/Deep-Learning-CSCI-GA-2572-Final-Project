@@ -132,6 +132,7 @@ class JEPAConfig(ConfigBase):
     embed_dim: int = 256
     action_dim: int = 2
     in_c: int = 2
+    out_c: int = 64
     epochs: int = 20
     batch_size: int = 1024
     optimizer_type: str = 'adamw'
