@@ -11,7 +11,7 @@ scheduler_type: 'onecycle'
 
 # action regularization
 action_reg_hidden_dim: 32
-lambda_reg: 1
+lambda_reg: 0
 
 vicreg_loss:
   lambda_invariance: 1
