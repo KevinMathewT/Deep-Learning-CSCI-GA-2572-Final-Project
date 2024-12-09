@@ -1940,6 +1940,80 @@ class ActionRegularizationJEPA2DFlexibleEncoder(BaseModel):
 
         return vicreg_loss, invariance_loss, variance_loss, covariance_loss
 
+
+    def compute_vicreg_loss_spatial(self, preds, enc_s, gamma=1.0, epsilon=1e-4):
+        """
+        Compute VICReg loss with invariance, variance, and covariance terms calculated for each spatial position across channels,
+        in a fully parallelized manner.
+
+        Args:
+            preds: Predicted embeddings from the predictor. Shape (B, T, C, H, W).
+            enc_s: Target embeddings from the encoder. Shape (B, T, C, H, W).
+            gamma: Target standard deviation for variance term.
+            epsilon: Small value to avoid numerical instability.
+
+        Returns:
+            vicreg_loss: The combined VICReg loss.
+        """
+
+        # taking from config
+        lambda_invariance = self.config.vicreg_loss.lambda_invariance
+        mu_variance = self.config.vicreg_loss.mu_variance
+        nu_covariance = self.config.vicreg_loss.nu_covariance
+
+        preds, enc_s = preds[:, 1:], enc_s[:, 1:]  # Drop the first timestep
+
+        # Get dimensions
+        B, T, C, H, W = preds.shape
+
+        # Reshape tensors for processing: (B*T, C, H, W)
+        Z = preds.reshape(B * T, C, H, W)
+        Z_prime = enc_s.reshape(B * T, C, H, W)
+
+        # --- Invariance Term ---
+        # Compute the squared difference across channels for each pixel and sum it
+        invariance_loss = torch.mean((Z - Z_prime) ** 2)
+
+        # --- Variance Term ---
+        # Compute variance along the batch dimension (B*T) at each spatial location (H, W)
+        std_Z = torch.sqrt(Z.var(dim=0, unbiased=False) + epsilon)  # Shape (C, H, W)
+        std_Z_prime = torch.sqrt(Z_prime.var(dim=0, unbiased=False) + epsilon)  # Shape (C, H, W)
+
+        # Penalize if standard deviation is below gamma
+        variance_loss = (
+            torch.mean(F.relu(gamma - std_Z)) + torch.mean(F.relu(gamma - std_Z_prime))
+        )
+
+        # --- Covariance Term ---
+        # Center the embeddings along the batch dimension
+        Z_centered = Z - Z.mean(dim=0, keepdim=True)  # Shape (B*T, C, H, W)
+        Z_prime_centered = Z_prime - Z_prime.mean(dim=0, keepdim=True)  # Shape (B*T, C, H, W)
+
+        # Compute covariance at each spatial location
+        # Flatten (B*T, C) for each pixel (H, W)
+        Z_centered = Z_centered.permute(2, 3, 0, 1).reshape(H * W, B * T, C)  # Shape (H*W, B*T, C)
+        Z_prime_centered = Z_prime_centered.permute(2, 3, 0, 1).reshape(H * W, B * T, C)  # Shape (H*W, B*T, C)
+
+        # Compute covariance matrices for all pixels in parallel
+        cov_Z = (Z_centered.transpose(1, 2) @ Z_centered) / (B * T - 1)  # Shape (H*W, C, C)
+        cov_Z_prime = (Z_prime_centered.transpose(1, 2) @ Z_prime_centered) / (B * T - 1)  # Shape (H*W, C, C)
+
+        # Compute the sum of squared off-diagonal elements
+        cov_loss_Z = torch.sum(cov_Z**2, dim=(-2, -1)) - torch.sum(torch.diagonal(cov_Z, dim1=-2, dim2=-1) ** 2, dim=-1)
+        cov_loss_Z_prime = torch.sum(cov_Z_prime**2, dim=(-2, -1)) - torch.sum(torch.diagonal(cov_Z_prime, dim1=-2, dim2=-1) ** 2, dim=-1)
+
+        covariance_loss = torch.sum(cov_loss_Z + cov_loss_Z_prime) / (H * W)
+
+        # --- Total VICReg Loss ---
+        vicreg_loss = (
+            lambda_invariance * invariance_loss
+            + mu_variance * variance_loss
+            + nu_covariance * covariance_loss
+        )
+
+        return vicreg_loss, invariance_loss, variance_loss, covariance_loss
+
+
     def training_step(self, batch, device):
         states, actions = batch.states.to(device, non_blocking=True), batch.actions.to(
             device, non_blocking=True
@@ -1965,8 +2039,14 @@ class ActionRegularizationJEPA2DFlexibleEncoder(BaseModel):
             self.compute_vicreg_loss(preds, enc_s)
         )  # VICReg Loss Calculation
 
+
+        # Compute VICReg Loss
+        vic_reg_loss_s, invariance_loss_s, variance_loss_s, covariance_loss_s = (
+            self.compute_vicreg_loss_spatial(preds, enc_s)
+        )  # VICReg Loss Calculation
+
         # Combine losses
-        total_loss = vic_reg_loss + self.config.lambda_reg * action_reg_loss
+        total_loss = ((vic_reg_loss + vic_reg_loss_s) / 2) + self.config.lambda_reg * action_reg_loss
 
         self.optimizer.zero_grad()
         total_loss.backward()
@@ -2008,6 +2088,9 @@ class ActionRegularizationJEPA2DFlexibleEncoder(BaseModel):
             "invariance_loss": invariance_loss,
             "variance_loss": variance_loss,
             "covariance_loss": covariance_loss,
+            "invariance_loss_s": invariance_loss_s,
+            "variance_loss_s": variance_loss_s,
+            "covariance_loss_s": covariance_loss_s,
         }
 
         # Non-loggable data
