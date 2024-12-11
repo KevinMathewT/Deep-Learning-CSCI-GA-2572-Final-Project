@@ -51,6 +51,10 @@ def setup(config):
     ModelClass = get_model(config.model_type)
     model = ModelClass(config).to(device)
 
+    print("---------------- Model Summary ----------------")
+    print(model)
+    print("----------------------------------------------")
+    
     # Prepare the components with the Accelerator
     model, tdl, vdl = acc.prepare(model, tdl, vdl)
     return acc, model, tdl, vdl

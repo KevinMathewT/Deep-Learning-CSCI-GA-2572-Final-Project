@@ -1439,9 +1439,11 @@ class Predictor2D(nn.Module):
         # For simplicity, we'll assume identity for state embedding
 
         self.conv = nn.Sequential(
-            nn.Conv2d(self.config.out_c + 1, self.config.out_c, kernel_size=3, stride=1, padding=1),  # Combine state and action
+            nn.Conv2d(self.config.out_c + 1, self.config.out_c * 4, kernel_size=3, stride=1, padding=1),  # Combine state and action
             nn.ReLU(),
-            nn.Conv2d(self.config.out_c, self.config.out_c, kernel_size=3, stride=1, padding=1),  # Reduce to single-channel
+            nn.Conv2d(self.config.out_c * 2, self.config.out_c * 2, kernel_size=3, stride=1, padding=1),  # Reduce to single-channel
+            nn.ReLU(),
+            nn.Conv2d(self.config.out_c * 2, self.config.out_c, kernel_size=3, stride=1, padding=1),  # Reduce to single-channel
             nn.ReLU(),
         )
 
@@ -2263,6 +2265,243 @@ class ActionRegularizationJEPA2Dv2(nn.Module):
         self.config = config
         self.enc = Encoder2Dv2(config)
         self.pred = Predictor2Dv2(input_dim=66, output_dim=64)  # Same as original code
+        # self.action_reg_net = ActionRegularizer2D(config, config.embed_dim, config.action_dim)  # Not used
+
+        # Create optimizer and scheduler as per original code
+        params = list(self.enc.parameters()) + list(self.pred.parameters())
+        self.optimizer = AdamW(params, lr=1e-3)
+        self.scheduler = OneCycleLR(self.optimizer, max_lr=1e-2, steps_per_epoch=config.steps_per_epoch, epochs=config.epochs,)
+
+        # VICReg parameters from original code
+        self.inv_coeff = 25.0
+        self.var_coeff = 15.0
+        self.cov_coeff = 1.0
+        self.gamma = 1.0
+
+
+    def forward(self, states, actions, teacher_forcing=True):
+        # states: (B, T, 2, H, W)
+        # actions: (B, T-1, 2)
+        B, T, C, H, W = states.shape
+        # C should be 2 as per encoder input
+
+        if teacher_forcing:
+            # Pass states directly to encoder; it handles flattening internally.
+            enc_states = self.enc(states)  # (B, T, C_out, H_out, W_out)
+            # Initialize predictions (same shape as enc_states)
+            preds = torch.zeros_like(enc_states)  # (B, T, C_out, H_out, W_out)
+            preds[:, 0] = enc_states[:, 0]  # First predicted state is the first encoded state
+
+            # Use predictor to predict next states
+            # The predictor expects:
+            #   enc_states: (B, T, C_out, H_out, W_out)
+            #   actions: (B, T-1, 2)
+            # returns: (B, T-1, output_dim, H_out, W_out)
+            pred_states = self.pred(enc_states, actions)
+
+            # Assign predicted states to preds at t=1 to T-1
+            preds[:, 1:] = pred_states
+
+            return preds, enc_states
+
+        else:
+            # Non-teacher forcing scenario:
+            # Take the first state only
+            states_0 = states[:, 0]  # (B, 2, H, W)
+            # Encoder expects (B, T, 2, H, W), so add a time dimension for a single step
+            enc_state = self.enc(states_0.unsqueeze(1))  # (B, 1, C_out, H_out, W_out)
+            
+            preds = [enc_state]
+
+            # Predict step by step for remaining timesteps
+            for t in range(1, T):
+                action_t_minus1 = actions[:, t - 1]  # (B, 2)
+                state_embed_t_minus1 = preds[-1]  # (B, 1, C_out, H_out, W_out)
+
+                # The predictor expects a sequence along T, but we have only one timestep to predict.
+                # We'll just pass a single-step sequence (T=1):
+                # actions also need a time dimension: (B,1,2)
+                pred_state = self.pred(state_embed_t_minus1, action_t_minus1.unsqueeze(1))  
+                # pred_state: (B, 1, C_out, H_out, W_out)
+
+                preds.append(pred_state)
+
+            # Stack predictions: (B, T, C_out, H_out, W_out)
+            preds = torch.cat(preds, dim=1)
+            preds = preds.view(B, T, -1)  # (B, T, C_out*H_out*W_out)
+            return preds
+
+
+
+    def representation_loss(self, x, y):
+        # As original VICReg: MSE loss
+        return F.mse_loss(x, y)
+
+    def variance_loss(self, x, gamma):
+        x = x - x.mean(dim=0)
+        std = x.std(dim=0)
+        var_loss = F.relu(gamma - std).mean()
+        return var_loss
+
+    def covariance_loss(self, x):
+        x = x - x.mean(dim=0)
+        cov = (x.T @ x) / (x.shape[0] - 1)
+        cov.fill_diagonal_(0.0)
+        cov_loss = cov.pow(2).sum() / x.shape[1]
+        return cov_loss
+
+    def compute_vicreg_losses(self, predicted_next, target_encoded):
+        # Compute VICReg losses as in the original code
+        # predicted_next, target_encoded: after flattening appropriately
+
+        # invariance
+        inv_loss = self.inv_coeff * self.representation_loss(predicted_next, target_encoded)
+
+        # variance
+        var_loss_x = self.var_coeff * self.variance_loss(predicted_next, self.gamma)
+        var_loss_y = self.var_coeff * self.variance_loss(target_encoded, self.gamma)
+        var_loss = (var_loss_x + var_loss_y) / 2
+
+        # covariance
+        cov_loss_x = self.cov_coeff * self.covariance_loss(predicted_next)
+        cov_loss_y = self.cov_coeff * self.covariance_loss(target_encoded)
+        cov_loss = (cov_loss_x + cov_loss_y) / 2
+
+        loss = inv_loss + var_loss + cov_loss
+        return {
+            "loss": loss,
+            "inv-loss": inv_loss,
+            "var-loss": var_loss,
+            "cov-loss": cov_loss
+        }
+
+    def training_step(self, batch, device):
+        states, _, actions = batch
+        states = states.to(device)
+        actions = actions.to(device)
+
+        predicted_next, enc_states = self(states, actions)
+
+        # target_encoded = enc_states[:, 1:] (B, T-1, C, H', W')
+        target_encoded = enc_states[:, 1:]
+
+        # predicted_next: (B, T-1, C, H', W')
+        # For VICReg, we compute loss globally and also add a spatially-resolved term as in original code.
+
+        # Flatten for global VICReg:
+        B, Tm1, C, H, W = predicted_next.shape
+        # Flatten channels + spatial:
+        pred_global = predicted_next.flatten(start_dim=1, end_dim=-1)  # (B, (T-1)*C*H*W)
+        targ_global = target_encoded.flatten(start_dim=1, end_dim=-1)  # (B, (T-1)*C*H*W)
+
+        vicreg_global_metrics = self.compute_vicreg_losses(pred_global, targ_global)
+
+        # Spatial-level VICReg:
+        # Permute to treat each spatial location as a separate sample:
+        # predicted_next_spatial: (B*(T-1)*H*W, C)
+        predicted_next_spatial = predicted_next.permute(0,1,3,4,2).flatten(end_dim=-2)  # (B*(T-1)*H*W, C)
+        target_encoded_spatial = target_encoded.permute(0,1,3,4,2).flatten(end_dim=-2)  # (B*(T-1)*H*W, C)
+
+        vicreg_spatial_metrics = self.compute_vicreg_losses(predicted_next_spatial, target_encoded_spatial)
+
+        combined_loss = vicreg_global_metrics["loss"] + vicreg_spatial_metrics["loss"]
+
+        # Backprop
+        self.optimizer.zero_grad()
+        combined_loss.backward()
+        self.optimizer.step()
+        self.scheduler.step()
+
+        # Prepare metrics for logging
+        output = {
+            "loss": combined_loss.item(),
+            "inv_loss": (vicreg_global_metrics["inv-loss"].item() + vicreg_spatial_metrics["inv-loss"].item()),
+            "var_loss": (vicreg_global_metrics["var-loss"].item() + vicreg_spatial_metrics["var-loss"].item()),
+            "cov_loss": (vicreg_global_metrics["cov-loss"].item() + vicreg_spatial_metrics["cov-loss"].item()),
+            "lr": self.scheduler.get_last_lr()[0],
+        }
+
+        return output
+
+    def validation_step(self, batch, device):
+        states, _, actions = batch
+        states = states.to(device)
+        actions = actions.to(device)
+
+        enc_states, predicted_next = self(states, actions)
+        target_encoded = enc_states[:, 1:]
+
+        # Compute just the global VICReg loss for validation for simplicity
+        B, Tm1, C, H, W = predicted_next.shape
+        pred_global = predicted_next.flatten(start_dim=1, end_dim=-1)
+        targ_global = target_encoded.flatten(start_dim=1, end_dim=-1)
+
+        vicreg_metrics = self.compute_vicreg_losses(pred_global, targ_global)
+        val_loss = vicreg_metrics["loss"].item()
+
+        output = {
+            "val_loss": val_loss,
+            "inv_loss": vicreg_metrics["inv-loss"].item(),
+            "var_loss": vicreg_metrics["var-loss"].item(),
+            "cov_loss": vicreg_metrics["cov-loss"].item(),
+            "lr": self.scheduler.get_last_lr()[0],
+        }
+
+        return output
+
+
+# Modify Encoder class
+class Encoder2Dv3(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.convnext = create_model('resnet18.a1_in1k', pretrained=False, num_classes=0, in_chans=2, features_only=True)
+    
+    def forward(self, x):
+        # Reshape input to merge batch and trajectory dimensions
+        original_shape = x.shape
+        x = x.view(-1, *original_shape[-3:])  # Reshape to [batch*trajectory, channels, height, width]
+        features = self.convnext(x)[1]
+        
+        # Reshape features back to original trajectory structure
+        features = features.view(original_shape[0], original_shape[1], *features.shape[-3:])
+        return features
+
+# Modify Predictor class
+class Predictor2Dv3(nn.Module):
+    def __init__(self, input_dim, output_dim):
+        super().__init__()
+        self.predictor = nn.Sequential(
+            nn.Conv2d(input_dim, input_dim-2, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(input_dim-2, output_dim, kernel_size=3, padding=1)
+        )
+    
+    def forward(self, encoded_o_t, action):
+        # Reshape inputs
+        batch_size, trajectory_length = encoded_o_t.shape[:2]
+        
+        # Reshape action to match encoded_o_t dimensions
+        action = action.view(batch_size, trajectory_length-1, 2, 1, 1)
+        action = action.repeat(1, 1, 1, encoded_o_t.size(3), encoded_o_t.size(4))
+        
+        # Prepare inputs for prediction
+        predictions = []
+        for t in range(trajectory_length - 1):
+            # Concatenate current encoded state with action
+            x = torch.cat([encoded_o_t[:, t], action[:, t]], dim=1)
+            pred = self.predictor(x)
+            predictions.append(pred)
+        
+        return torch.stack(predictions, dim=1)
+
+
+
+class JEPA2Dv3(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+        self.enc = Encoder2Dv3(config)
+        self.pred = Predictor2Dv3(input_dim=66, output_dim=64)  # Same as original code
         # self.action_reg_net = ActionRegularizer2D(config, config.embed_dim, config.action_dim)  # Not used
 
         # Create optimizer and scheduler as per original code
