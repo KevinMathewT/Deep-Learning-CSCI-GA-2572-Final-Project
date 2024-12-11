@@ -4,7 +4,7 @@ in_c: 2
 out_c: 64
 epochs: 20
 batch_size: 256
-learning_rate: 0.00015
+learning_rate: 0.00014
 model_type: 'ActionRegularizationJEPA2DFlexibleEncoder'
 data_path: '/scratch/DL24FA/train'
 optimizer_type: 'adam'
