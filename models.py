@@ -1939,6 +1939,7 @@ class ActionRegularizationJEPA2DFlexibleEncoder(BaseModel):
             preds = preds.view(B, T, -1)  # (B, T, C'*H'*W')
 
             if return_enc:
+                states = states.view(B * T, C, H, W)
                 enc_states = self.enc(states)  # (B*T, C', H', W')
                 _, C_out, H_out, W_out = enc_states.shape
                 enc_states = enc_states.view(
