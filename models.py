@@ -1966,7 +1966,7 @@ class ActionRegularizationJEPA2DFlexibleEncoder(BaseModel):
         states, actions = batch.states.to(device, non_blocking=True), batch.actions.to(
             device, non_blocking=True
         )
-        preds, enc_s = self.forward(states, actions, teacher_forcing=self.config.teacher_forcing)  # preds, enc_s: (B, T, 1, H, W)
+        preds, enc_s = self.forward(states, actions, teacher_forcing=True)  # preds, enc_s: (B, T, 1, H, W)
 
         # Compute regularization loss
         B, T, _, H, W = enc_s.shape  # (B, T, 1, H, W)
