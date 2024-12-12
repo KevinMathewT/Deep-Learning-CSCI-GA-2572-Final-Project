@@ -1,7 +1,7 @@
 embed_dim: 289
 action_dim: 2
 in_c: 2
-out_c: 64
+out_c: 16
 epochs: 20
 batch_size: 64
 learning_rate: 0.00015
