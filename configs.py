@@ -146,4 +146,6 @@ class JEPAConfig(ConfigBase):
     delta_gen: int = 1
     encoder_backbone: str = "resnet18.a1_in1k"
     teacher_forcing: str = 'True'
+    return_enc: str = 'True'
+    pred_flattened: str = 'False'
     # You can add more configuration parameters as needed

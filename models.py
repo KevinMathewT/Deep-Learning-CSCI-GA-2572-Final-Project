@@ -1460,15 +1460,15 @@ class Predictor2D(nn.Module):
         self.conv = nn.Sequential(
             nn.Conv2d(
                 self.config.out_c + 1,
-                self.config.out_c * 4,
+                self.config.out_c,
                 kernel_size=3,
                 stride=1,
                 padding=1,
             ),  # Combine state and action
             nn.ReLU(),
             nn.Conv2d(
-                self.config.out_c * 4,
-                self.config.out_c * 2,
+                self.config.out_c,
+                self.config.out_c,
                 kernel_size=3,
                 stride=1,
                 padding=1,
@@ -1481,7 +1481,6 @@ class Predictor2D(nn.Module):
                 stride=1,
                 padding=1,
             ),  # Reduce to single-channel
-            nn.ReLU(),
         )
 
     def forward(self, s_embed, a):
@@ -1979,8 +1978,8 @@ class ActionRegularizationJEPA2DFlexibleEncoder(BaseModel):
             states, 
             actions, 
             teacher_forcing=self.config.teacher_forcing, 
-            return_enc=True, 
-            pred_flattened=False
+            return_enc=self.config.return_enc, 
+            pred_flattened=self.config.pred_flattened
         )  # preds, enc_s: (B, T, 1, H, W)
 
         # Compute regularization loss
@@ -2081,8 +2080,8 @@ class ActionRegularizationJEPA2DFlexibleEncoder(BaseModel):
             states, 
             actions, 
             teacher_forcing=self.config.teacher_forcing, 
-            return_enc=True, 
-            pred_flattened=False
+            return_enc=self.config.return_enc, 
+            pred_flattened=self.config.pred_flattened
         )  # preds, enc_s: (B, T, 1, H, W)
 
         # Compute MSE Loss

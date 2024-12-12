@@ -9,7 +9,9 @@ model_type: 'ActionRegularizationJEPA2DFlexibleEncoder'
 data_path: '/scratch/DL24FA/train'
 optimizer_type: 'adam'
 scheduler_type: 'onecycle'
-teacher_forcing: false
+teacher_forcing: true
+return_enc: true
+pred_flattened: false
 
 # action regularization
 action_reg_hidden_dim: 32
