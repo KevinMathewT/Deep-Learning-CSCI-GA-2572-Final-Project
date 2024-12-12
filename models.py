@@ -2143,17 +2143,17 @@ class ActionRegularizationJEPA2DFlexibleEncoder(BaseModel):
 
         # Compute VICReg Loss
         vic_reg_loss, invariance_loss, variance_loss, covariance_loss = vicreg_loss(
-                pred_states.flatten(start_dim=2, end_dim=-1), # (B, T * C * H * W)
-                states_embed.flatten(start_dim=2, end_dim=-1), # (B, T * C * H * W)
+                pred_states.flatten(start_dim=0, end_dim=-1), # (B, T * C * H * W)
+                states_embed.flatten(start_dim=0, end_dim=-1), # (B, T * C * H * W)
             )
 
         # Compute VICReg Loss
         vic_reg_loss_s, invariance_loss_s, variance_loss_s, covariance_loss_s = vicreg_loss(
-            pred_states.flatten(start_dim=0, end_dim=1)
-            .permute(0, 2, 3, 1)
+            pred_states.flatten(start_dim=0, end_dim=1) # (B * T, H, W, C)
+            .permute(0, 2, 3, 1) # (B * T, H, W, C)
             .flatten(end_dim=-2), # (B * T * H * W, C)
             states_embed.flatten(start_dim=0, end_dim=1)
-            .permute(0, 2, 3, 1)
+            .permute(0, 2, 3, 1) # (B * T, H, W, C)
             .flatten(end_dim=-2), # (B * T * H * W, C)
         )
 
