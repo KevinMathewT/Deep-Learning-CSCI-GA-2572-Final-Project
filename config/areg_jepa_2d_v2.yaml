@@ -4,7 +4,7 @@ in_c: 2
 out_c: 8
 epochs: 20
 batch_size: 64
-learning_rate: 0.000015
+learning_rate: 0.0001
 model_type: 'ActionRegularizationJEPA2DFlexibleEncoder'
 data_path: '/scratch/DL24FA/train'
 optimizer_type: 'adam'
@@ -23,4 +23,4 @@ vicreg_loss:
   nu_covariance: 1
 
 # encoder_backbone: resnet18.a1_in1k
-encoder_backbone: resnet101d.ra2_in1k
+encoder_backbone: seresnext26ts.ch_in1k
