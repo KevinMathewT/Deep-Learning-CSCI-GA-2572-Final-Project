@@ -1888,6 +1888,7 @@ class ActionRegularizationJEPA2DFlexibleEncoder(BaseModel):
     def forward(self, states, actions, teacher_forcing=True):
         B, _, C, H, W = states.shape  # states: (B, T, C, H, W)
         T = actions.shape[1] + 1  # Number of timesteps | actions: (B, T-1, action_dim)
+        print(f'teacher_forcing: {teacher_forcing}')
 
         if teacher_forcing:
             states = states.view(B * T, C, H, W)  # Reshape to (B*T, C, H, W)
