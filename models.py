@@ -1845,12 +1845,8 @@ class FlexibleEncoder2D(nn.Module):
         # Select the layer closest to 16x16
         self.closest_layer_index = self._find_closest_layer()
 
-        # Final adjustment to 16x16
-        # self.adjust_to_target = nn.Sequential(
-        #     nn.Conv2d(self.feature_channels[self.closest_layer_index], 64, kernel_size=3, stride=1, padding=1),
-        #     nn.ReLU(),
-        #     nn.Conv2d(64, 1, kernel_size=3, stride=1, padding=1)
-        # )
+        input_ch = self.feature_channels[self.closest_layer_index]
+        self.channel_adjust = nn.Conv2d(input_ch, config.out_c, kernel_size=1)
 
     def _find_closest_layer(self):
         # Find the layer whose spatial size is closest to output_side
