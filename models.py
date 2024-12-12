@@ -1916,10 +1916,7 @@ class ActionRegularizationJEPA2DFlexibleEncoder(BaseModel):
             preds[:, 1:, :, :, :] = pred_states  # Assign predictions to preds
 
             if return_enc:
-                return (
-                    preds,
-                    enc_states,
-                )  # preds: (B, T, C', H', W'), enc_states: (B, T, C', H', W')
+                return preds, enc_states # preds: (B, T, C', H', W'), enc_states: (B, T, C', H', W')
             return preds
 
         else:
@@ -1942,7 +1939,12 @@ class ActionRegularizationJEPA2DFlexibleEncoder(BaseModel):
             preds = preds.view(B, T, -1)  # (B, T, C'*H'*W')
 
             if return_enc:
-                return preds, enc_state
+                enc_states = self.enc(states)  # (B*T, C', H', W')
+                _, C_out, H_out, W_out = enc_states.shape
+                enc_states = enc_states.view(
+                    B, T, C_out, H_out, W_out
+                )  # (B, T, C', H', W')
+                return preds, enc_states
             return preds
 
     def compute_mse_loss(self, preds, enc_s):
