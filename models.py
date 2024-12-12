@@ -1921,6 +1921,7 @@ class ActionRegularizationJEPA2DFlexibleEncoder(BaseModel):
             )  # preds: (B, T, C', H', W'), enc_states: (B, T, C', H', W')
 
         else:
+            print('came here')
             states_0 = states[:, 0, :, :, :]  # (B, C, H, W)
             enc_state = self.enc(states_0)  # (B, C', H', W')
             preds = [enc_state]  # List to store predictions
