@@ -12,6 +12,10 @@ from configs import JEPAConfig
 
 from typing import Dict
 
+from loss import VICRegLoss
+
+vicreg_loss = VICRegLoss()
+
 
 def build_mlp(layers_dims: List[int]):
     layers = []

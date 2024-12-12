@@ -4,106 +4,119 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-def vicreg_loss(
-    x: torch.Tensor,
-    y: torch.Tensor,
-    inv_coeff: float = 25.0,
-    var_coeff: float = 15.0,
-    cov_coeff: float = 1.0,
-    gamma: float = 1.0,
-):
-    """Computes the VICReg loss.
 
-    ---
-    Args:
-        x: Features map.
-            Shape of [batch_size, representation_size].
-        y: Features map.
-            Shape of [batch_size, representation_size].
-        inv_coeff: Coefficient for the invariance loss.
-        var_coeff: Coefficient for the variance loss.
-        cov_coeff: Coefficient for the covariance loss.
-        gamma: Threshold for the variance loss.
+class VICRegLoss(nn.Module):
+    def __init__(
+        self,
+        inv_coeff: float = 25.0,
+        var_coeff: float = 15.0,
+        cov_coeff: float = 1.0,
+        gamma: float = 1.0,
+    ):
+        super().__init__()
+        self.inv_coeff = inv_coeff
+        self.var_coeff = var_coeff
+        self.cov_coeff = cov_coeff
+        self.gamma = gamma
 
-    ---
-    Returns:
-        A dictionary containing:
-            - "total_loss": The total VICReg loss.
-            - "inv_loss": The invariance loss.
-            - "var_loss": The variance loss.
-            - "cov_loss": The covariance loss.
-    """
-    inv_loss = inv_coeff * representation_loss(x, y)
-    var_loss = var_coeff * (
-        variance_loss(x, gamma) + variance_loss(y, gamma)
-    ) / 2
-    cov_loss = cov_coeff * (covariance_loss(x) + covariance_loss(y)) / 2
-    total_loss = inv_loss + var_loss + cov_loss
+        print("-" * 50)
+        print(f"VICReg Loss initialized with:")
+        print(f"  - Invariance coefficient: {inv_coeff}")
+        print(f"  - Variance coefficient: {var_coeff}")
+        print(f"  - Covariance coefficient: {cov_coeff}")
+        print(f"  - Variance threshold: {gamma}")
+        print("-" * 50)
 
-    return total_loss, inv_loss, var_loss, cov_loss
+    def forward(self, x: torch.Tensor, y: torch.Tensor) -> Dict[str, torch.Tensor]:
+        """Computes the VICReg loss.
 
+        ---
+        Args:
+            x: Features map.
+                Shape of [batch_size, representation_size].
+            y: Features map.
+                Shape of [batch_size, representation_size].
 
-def representation_loss(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-    """Computes the representation loss.
-    Force the representations of the same object to be similar.
+        ---
+        Returns:
+            The VICReg loss.
+                Dictionary where values are of shape of [1,].
+        """
+        metrics = dict()
+        metrics["inv-loss"] = self.inv_coeff * self.representation_loss(x, y)
+        metrics["var-loss"] = (
+            self.var_coeff
+            * (self.variance_loss(x, self.gamma) + self.variance_loss(y, self.gamma))
+            / 2
+        )
+        metrics["cov-loss"] = (
+            self.cov_coeff * (self.covariance_loss(x) + self.covariance_loss(y)) / 2
+        )
+        metrics["loss"] = sum(metrics.values())
+        return metrics
 
-    ---
-    Args:
-        x: Features map.
-            Shape of [batch_size, representation_size].
-        y: Features map.
-            Shape of [batch_size, representation_size].
+    @staticmethod
+    def representation_loss(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        """Computes the representation loss.
+        Force the representations of the same object to be similar.
 
-    ---
-    Returns:
-        The representation loss.
-            Shape of [1,].
-    """
-    return F.mse_loss(x, y)
+        ---
+        Args:
+            x: Features map.
+                Shape of [batch_size, representation_size].
+            y: Features map.
+                Shape of [batch_size, representation_size].
 
+        ---
+        Returns:
+            The representation loss.
+                Shape of [1,].
+        """
+        return F.mse_loss(x, y)
 
-def variance_loss(x: torch.Tensor, gamma: float) -> torch.Tensor:
-    """Computes the variance loss.
-    Push the representations across the batch
-    to be different between each other.
-    Avoid the model to collapse to a single point.
+    @staticmethod
+    def variance_loss(x: torch.Tensor, gamma: float) -> torch.Tensor:
+        """Computes the variance loss.
+        Push the representations across the batch
+        to be different between each other.
+        Avoid the model to collapse to a single point.
 
-    The gamma parameter is used as a threshold so that
-    the model is no longer penalized if its std is above
-    that threshold.
+        The gamma parameter is used as a threshold so that
+        the model is no longer penalized if its std is above
+        that threshold.
 
-    ---
-    Args:
-        x: Features map.
-            Shape of [batch_size, representation_size].
+        ---
+        Args:
+            x: Features map.
+                Shape of [batch_size, representation_size].
 
-    ---
-    Returns:
-        The variance loss.
-            Shape of [1,].
-    """
-    x = x - x.mean(dim=0)
-    std = x.std(dim=0)
-    var_loss = F.relu(gamma - std).mean()
-    return var_loss
+        ---
+        Returns:
+            The variance loss.
+                Shape of [1,].
+        """
+        x = x - x.mean(dim=0)
+        std = x.std(dim=0)
+        var_loss = F.relu(gamma - std).mean()
+        return var_loss
 
+    @staticmethod
+    def covariance_loss(x: torch.Tensor) -> torch.Tensor:
+        """Computes the covariance loss.
+        Decorrelates the embeddings' dimensions, which pushes
+        the model to capture more information per dimension.
 
-def covariance_loss(x: torch.Tensor) -> torch.Tensor:
-    """Computes the covariance loss.
-    Decorrelates the embeddings' dimensions, which pushes
-    the model to capture more information per dimension.
+        ---
+        Args:
+            x: Features map.
+                Shape of [batch_size, representation_size].
 
-    ---
-    Args:
-        x: Features map.
-            Shape of [batch_size, representation_size].
-
-    ---
-    Returns:
-        The covariance loss.
-            Shape of [1,].
-    """
-    x = x - x.mean(dim=0)
-    cov = (x.T @ x) / (x.shape[0] - 1)
-    cov_loss = cov.fill_diagonal_(0.0).pow(2).sum() / x.shape[1]
-    return cov_loss
+        ---
+        Returns:
+            The covariance loss.
+                Shape of [1,].
+        """
+        x = x - x.mean(dim=0)
+        cov = (x.T @ x) / (x.shape[0] - 1)
+        cov_loss = cov.fill_diagonal_(0.0).pow(2).sum() / x.shape[1]
+        return cov_loss
