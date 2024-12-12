@@ -1865,6 +1865,7 @@ class FlexibleEncoder2D(nn.Module):
         # Pass input through the backbone and select the appropriate layer
         features = self.backbone(x)
         x = features[self.closest_layer_index]  # Closest layer to 16x16
+        print(x.size(), features.size())
 
         # Adjust to target shape
         # x = self.adjust_to_target(x)
