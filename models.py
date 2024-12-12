@@ -1862,14 +1862,14 @@ class FlexibleEncoder2D(nn.Module):
         return closest_index
 
     def forward(self, x):
-        # Pass input through the backbone and select the appropriate layer
-        features = self.backbone(x)
-        x = features[self.closest_layer_index]  # Closest layer to 16x16
-        print(x.size(), features.size())
-
-        # Adjust to target shape
-        # x = self.adjust_to_target(x)
-        return x
+        # Reshape input to merge batch and trajectory dimensions
+        original_shape = x.shape
+        x = x.view(-1, *original_shape[-3:])  # Reshape to [batch*trajectory, channels, height, width]
+        features = self.convnext(x)[1]
+        
+        # Reshape features back to original trajectory structure
+        features = features.view(original_shape[0], original_shape[1], *features.shape[-3:])
+        return features
 
 
 class ActionRegularizationJEPA2DFlexibleEncoder(BaseModel):
