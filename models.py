@@ -7,7 +7,7 @@ import torch
 import timm
 
 from optimizer import get_optimizer, get_scheduler
-
+from loss import vicreg_loss
 from configs import JEPAConfig
 
 from typing import Dict
@@ -440,7 +440,12 @@ class AdversarialJEPAWithRegularization(BaseModel):
             config.embed_dim, config.action_dim, config.action_reg_hidden_dim
         )
 
-        self.gen_opt = get_optimizer(config, list(self.enc.parameters()) + list(self.pred.parameters()) + list(self.action_reg_net.parameters()))
+        self.gen_opt = get_optimizer(
+            config,
+            list(self.enc.parameters())
+            + list(self.pred.parameters())
+            + list(self.action_reg_net.parameters()),
+        )
         self.disc_opt = get_optimizer(config, self.disc.parameters())
 
         self.gen_sched = get_scheduler(self.gen_opt, config)
@@ -497,8 +502,7 @@ class AdversarialJEPAWithRegularization(BaseModel):
             preds = torch.stack(preds, dim=1)  # (B, T, embed_dim)
 
             return preds
-        
-    
+
     def compute_mse_loss(self, preds, enc_s):
         # preds, enc_s: (B, T, embed_dim)
         loss = F.mse_loss(
@@ -521,7 +525,7 @@ class AdversarialJEPAWithRegularization(BaseModel):
         # Compute MSE loss between predicted and actual actions
         reg_loss = F.mse_loss(predicted_actions, actions)
         return reg_loss
-    
+
     def compute_vicreg_loss(self, preds, enc_s, gamma=1.0, epsilon=1e-4):
         """
         Compute VICReg loss with invariance, variance, and covariance terms.
@@ -615,7 +619,7 @@ class AdversarialJEPAWithRegularization(BaseModel):
         # Average the losses
         disc_loss = (disc_loss_real + disc_loss_fake) / 2
         return disc_loss
-    
+
     def compute_generator_loss(self, preds):
         fake_embeddings = preds[:, 1:].detach().reshape(-1, self.config.embed_dim)
         real_labels = torch.ones(
@@ -664,8 +668,7 @@ class AdversarialJEPAWithRegularization(BaseModel):
         # Update learning rate schedulers
         self.gen_sched.step()
         self.disc_sched.step()
-        
-        
+
         learning_rate = self.gen_opt.param_groups[0]["lr"]
         disc_learning_rate = self.disc_opt.param_groups[0]["lr"]
 
@@ -1385,12 +1388,18 @@ class Encoder2D(nn.Module):
         self.repr_dim = config.embed_dim * config.out_c
 
         _input_size = 65
-        self.output_side = int(math.sqrt(self.repr_dim / config.out_c))  # Calculate the side of the 2D embedding
+        self.output_side = int(
+            math.sqrt(self.repr_dim / config.out_c)
+        )  # Calculate the side of the 2D embedding
         # Determine the number of convolutional blocks required
         self.num_conv_blocks = int(math.log2(_input_size / self.output_side))
-        if 2 ** self.num_conv_blocks * self.output_side != 2 ** int(math.log2(_input_size)):
-            raise ValueError("Cannot evenly reduce input_size to output_side using stride-2 convolutions.")
-        
+        if 2**self.num_conv_blocks * self.output_side != 2 ** int(
+            math.log2(_input_size)
+        ):
+            raise ValueError(
+                "Cannot evenly reduce input_size to output_side using stride-2 convolutions."
+            )
+
         layers = []
         in_channels = 2  # Input has 2 channels (agent and wall)
         out_channels = 16  # Start with 32 output channels
@@ -1402,8 +1411,9 @@ class Encoder2D(nn.Module):
                     kernel_size=3,
                     stride=2,
                     padding=0,
-                ) if i == 0 else
-                nn.Conv2d(
+                )
+                if i == 0
+                else nn.Conv2d(
                     in_channels,
                     out_channels,
                     kernel_size=3,
@@ -1416,7 +1426,9 @@ class Encoder2D(nn.Module):
             out_channels = min(out_channels * 2, 256)  # Cap channels at 256
 
         # Final convolution to reduce to single-channel output
-        layers.append(nn.Conv2d(in_channels, 1, kernel_size=1))  # Single-channel embedding
+        layers.append(
+            nn.Conv2d(in_channels, 1, kernel_size=1)
+        )  # Single-channel embedding
 
         self.conv = nn.Sequential(*layers)
 
@@ -1424,26 +1436,48 @@ class Encoder2D(nn.Module):
         # Input: (B, 2, 65, 65)
         x = self.conv(x)  # Dynamically reduce to (B, 1, output_side, output_side)
         return x  # Output shape: (B, 1, output_side, output_side)
-    
+
 
 class Predictor2D(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
         self.repr_dim = config.embed_dim * config.out_c
-        self.output_side = int(math.sqrt(self.repr_dim / config.out_c))  # Calculate 2D embedding dimensions
+        self.output_side = int(
+            math.sqrt(self.repr_dim / config.out_c)
+        )  # Calculate 2D embedding dimensions
 
-        self.action_proj = nn.Linear(self.config.action_dim, self.output_side ** 2)  # Project action to repr_dim
+        self.action_proj = nn.Linear(
+            self.config.action_dim, self.output_side**2
+        )  # Project action to repr_dim
         # Optionally, you can add a projection for the state embedding
         # self.state_proj = nn.Linear(self.repr_dim, self.repr_dim)
         # For simplicity, we'll assume identity for state embedding
 
         self.conv = nn.Sequential(
-            nn.Conv2d(self.config.out_c + 1, self.config.out_c * 4, kernel_size=3, stride=1, padding=1),  # Combine state and action
+            nn.Conv2d(
+                self.config.out_c + 1,
+                self.config.out_c * 4,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+            ),  # Combine state and action
             nn.ReLU(),
-            nn.Conv2d(self.config.out_c * 4, self.config.out_c * 2, kernel_size=3, stride=1, padding=1),  # Reduce to single-channel
+            nn.Conv2d(
+                self.config.out_c * 4,
+                self.config.out_c * 2,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+            ),  # Reduce to single-channel
             nn.ReLU(),
-            nn.Conv2d(self.config.out_c * 2, self.config.out_c, kernel_size=3, stride=1, padding=1),  # Reduce to single-channel
+            nn.Conv2d(
+                self.config.out_c * 2,
+                self.config.out_c,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+            ),  # Reduce to single-channel
             nn.ReLU(),
         )
 
@@ -1454,21 +1488,27 @@ class Predictor2D(nn.Module):
 
         # Project actions to match the 2D embedding
         a_proj = self.action_proj(a).view(B, 1, H, W)  # Action embedding: (B, 1, H, W)
-        x = torch.cat([s_embed, a_proj], dim=1)  # Combine state and action: (B, 2, H, W)
+        x = torch.cat(
+            [s_embed, a_proj], dim=1
+        )  # Combine state and action: (B, 2, H, W)
         x = self.conv(x)  # Process combined input: (B, 1, H, W)
         return x  # Predicted embedding: (B, 1, H, W)
-    
+
 
 class ActionRegularizer2D(nn.Module):
     def __init__(self, config, embed_dim, action_dim):
         super().__init__()
-        self.output_side = int(math.sqrt(embed_dim))  # Calculate the side of the 2D embedding
+        self.output_side = int(
+            math.sqrt(embed_dim)
+        )  # Calculate the side of the 2D embedding
         self.action_reg_net = nn.Sequential(
             nn.Conv2d(config.out_c, 16, kernel_size=3, padding=1),  # 2D conv layer
             nn.ReLU(),
             nn.Conv2d(16, 1, kernel_size=3, padding=1),  # Output single channel
             nn.Flatten(),  # Flatten to prepare for linear mapping
-            nn.Linear(self.output_side * self.output_side, action_dim),  # Map to action_dim
+            nn.Linear(
+                self.output_side * self.output_side, action_dim
+            ),  # Map to action_dim
         )
 
     def forward(self, states_embed, pred_states):
@@ -1481,12 +1521,13 @@ class ActionRegularizer2D(nn.Module):
             predicted_actions: Tensor of shape (B*(T-1), action_dim) - predicted actions
         """
         # Calculate embedding differences
-        embedding_diff = pred_states - states_embed  # (B*(T-1), 1, output_side, output_side)
+        embedding_diff = (
+            pred_states - states_embed
+        )  # (B*(T-1), 1, output_side, output_side)
 
         # Predict actions from embedding differences
         predicted_actions = self.action_reg_net(embedding_diff)  # (B*(T-1), action_dim)
         return predicted_actions
-    
 
 
 class ActionRegularizationJEPA2D(BaseModel):
@@ -1494,7 +1535,9 @@ class ActionRegularizationJEPA2D(BaseModel):
         super().__init__(config)
         self.enc = Encoder2D(config)
         self.pred = Predictor2D(config)
-        self.action_reg_net = ActionRegularizer2D(config, config.embed_dim, config.action_dim)  # Small network for action prediction from embedding differences
+        self.action_reg_net = ActionRegularizer2D(
+            config, config.embed_dim, config.action_dim
+        )  # Small network for action prediction from embedding differences
 
         self.optimizer = get_optimizer(config, self.parameters())
         self.scheduler = get_scheduler(self.optimizer, config)
@@ -1513,18 +1556,27 @@ class ActionRegularizationJEPA2D(BaseModel):
             _, _, H_out, W_out = enc_states.shape
             enc_states = enc_states.view(B, T, 1, H_out, W_out)  # (B, T, 1, H', W')
             preds = torch.zeros_like(enc_states)  # preds: (B, T, 1, H', W')
-            preds[:, 0, :, :, :] = enc_states[:, 0, :, :, :]  # Initialize first timestep
+            preds[:, 0, :, :, :] = enc_states[
+                :, 0, :, :, :
+            ]  # Initialize first timestep
 
             # Prepare inputs for the predictor
             states_embed = enc_states[:, :-1, :, :, :]  # (B, T-1, 1, H', W')
-            states_embed = states_embed.contiguous().view(-1, 1, H_out, W_out)  # (B*(T-1), 1, H', W')
+            states_embed = states_embed.contiguous().view(
+                -1, 1, H_out, W_out
+            )  # (B*(T-1), 1, H', W')
             actions = actions.view(-1, self.config.action_dim)  # (B*(T-1), action_dim)
 
             pred_states = self.pred(states_embed, actions)  # (B*(T-1), 1, H', W')
-            pred_states = pred_states.view(B, T - 1, 1, H_out, W_out)  # (B, T-1, 1, H', W')
+            pred_states = pred_states.view(
+                B, T - 1, 1, H_out, W_out
+            )  # (B, T-1, 1, H', W')
             preds[:, 1:, :, :, :] = pred_states  # Assign predictions to preds
 
-            return preds, enc_states  # preds: (B, T, 1, H', W'), enc_states: (B, T, 1, H', W')
+            return (
+                preds,
+                enc_states,
+            )  # preds: (B, T, 1, H', W'), enc_states: (B, T, 1, H', W')
 
         else:
             states_0 = states[:, 0, :, :, :]  # (B, C, H, W)
@@ -1533,8 +1585,12 @@ class ActionRegularizationJEPA2D(BaseModel):
 
             for t in range(1, T):
                 action_t_minus1 = actions[:, t - 1, :]  # (B, action_dim)
-                state_embed_t_minus1 = preds[-1]  # Use the last predicted embedding (B, 1, H', W')
-                pred_state = self.pred(state_embed_t_minus1, action_t_minus1)  # (B, 1, H', W')
+                state_embed_t_minus1 = preds[
+                    -1
+                ]  # Use the last predicted embedding (B, 1, H', W')
+                pred_state = self.pred(
+                    state_embed_t_minus1, action_t_minus1
+                )  # (B, 1, H', W')
                 preds.append(pred_state)
 
             # Stack predictions and true encodings along the time dimension
@@ -1543,7 +1599,7 @@ class ActionRegularizationJEPA2D(BaseModel):
             return preds
 
     def compute_mse_loss(self, preds, enc_s):
-        # preds, enc_s: (B, T, 1, H', W') 
+        # preds, enc_s: (B, T, 1, H', W')
         loss = F.mse_loss(
             preds[:, 1:], enc_s[:, 1:]
         )  # Compute MSE loss for timesteps 1 to T-1
@@ -1556,7 +1612,9 @@ class ActionRegularizationJEPA2D(BaseModel):
         # states_embed and pred_states: (B*(T-1), 1, H', W')
         # actions: (B*(T-1), action_dim)
         # Predict actions from embedding differences
-        predicted_actions = self.action_reg_net(states_embed, pred_states)  # (B*(T-1), action_dim)
+        predicted_actions = self.action_reg_net(
+            states_embed, pred_states
+        )  # (B*(T-1), action_dim)
 
         # Compute MSE loss between predicted and actual actions
         reg_loss = F.mse_loss(predicted_actions, actions)
@@ -1584,8 +1642,8 @@ class ActionRegularizationJEPA2D(BaseModel):
         preds, enc_s = preds[:, 1:], enc_s[:, 1:]  # Drop the first timestep
 
         # Flatten spatial and temporal dimensions for batch processing
-        B, T, _, H, W = preds.shape
-        embed_dim = H * W
+        B, T, C, H, W = preds.shape
+        embed_dim = C * H * W
         Z = preds.reshape(B * T, embed_dim)  # Predicted embeddings
         Z_prime = enc_s.reshape(B * T, embed_dim)  # Target embeddings
 
@@ -1643,7 +1701,9 @@ class ActionRegularizationJEPA2D(BaseModel):
         pred_states = preds[:, 1:, :, :, :].reshape(
             -1, 1, H, W
         )  # Output of predictor: (B*(T-1), 1, H, W)
-        actions = actions.reshape(-1, self.config.action_dim)  # Actions: (B*(T-1), action_dim)
+        actions = actions.reshape(
+            -1, self.config.action_dim
+        )  # Actions: (B*(T-1), action_dim)
 
         action_reg_loss = self.compute_regularization_loss(
             states_embed, pred_states, actions
@@ -1758,7 +1818,9 @@ class FlexibleEncoder2D(nn.Module):
         self.repr_dim = config.embed_dim * config.out_c
 
         # Ensure output size is consistent
-        self.output_side = int(math.sqrt(self.repr_dim / config.out_c))  # Should be 16 for config.embed_dim=256
+        self.output_side = int(
+            math.sqrt(self.repr_dim / config.out_c)
+        )  # Should be 16 for config.embed_dim=256
         # if self.output_side != 16:
         #     raise ValueError("Output side must be 16 for config.embed_dim=256.")
 
@@ -1772,8 +1834,10 @@ class FlexibleEncoder2D(nn.Module):
         )
 
         # Inspect available feature maps
-        self.feature_channels = [info['num_chs'] for info in self.backbone.feature_info]
-        self.feature_shapes = [info['reduction'] for info in self.backbone.feature_info]  # Spatial size reductions
+        self.feature_channels = [info["num_chs"] for info in self.backbone.feature_info]
+        self.feature_shapes = [
+            info["reduction"] for info in self.backbone.feature_info
+        ]  # Spatial size reductions
 
         # Select the layer closest to 16x16
         self.closest_layer_index = self._find_closest_layer()
@@ -1789,7 +1853,9 @@ class FlexibleEncoder2D(nn.Module):
         # Find the layer whose spatial size is closest to output_side
         input_size = 65  # Assumes input spatial dimensions (H, W) = 65x65
         reductions = [input_size // red for red in self.feature_shapes]
-        closest_index = min(range(len(reductions)), key=lambda i: abs(reductions[i] - self.output_side))
+        closest_index = min(
+            range(len(reductions)), key=lambda i: abs(reductions[i] - self.output_side)
+        )
         return closest_index
 
     def forward(self, x):
@@ -1807,7 +1873,9 @@ class ActionRegularizationJEPA2DFlexibleEncoder(BaseModel):
         super().__init__(config)
         self.enc = FlexibleEncoder2D(config)
         self.pred = Predictor2D(config)
-        self.action_reg_net = ActionRegularizer2D(config, config.embed_dim, config.action_dim)  # Small network for action prediction from embedding differences
+        self.action_reg_net = ActionRegularizer2D(
+            config, config.embed_dim, config.action_dim
+        )  # Small network for action prediction from embedding differences
 
         self.optimizer = get_optimizer(config, self.parameters())
         self.scheduler = get_scheduler(self.optimizer, config)
@@ -1824,20 +1892,31 @@ class ActionRegularizationJEPA2DFlexibleEncoder(BaseModel):
 
             enc_states = self.enc(states)  # (B*T, 1, H', W')
             _, _, H_out, W_out = enc_states.shape
-            enc_states = enc_states.view(B, T, self.config.out_c, H_out, W_out)  # (B, T, C, H', W')
+            enc_states = enc_states.view(
+                B, T, self.config.out_c, H_out, W_out
+            )  # (B, T, C, H', W')
             preds = torch.zeros_like(enc_states)  # preds: (B, T, 1, H', W')
-            preds[:, 0, :, :, :] = enc_states[:, 0, :, :, :]  # Initialize first timestep
+            preds[:, 0, :, :, :] = enc_states[
+                :, 0, :, :, :
+            ]  # Initialize first timestep
 
             # Prepare inputs for the predictor
             states_embed = enc_states[:, :-1, :, :, :]  # (B, T-1, 1, H', W')
-            states_embed = states_embed.contiguous().view(-1, self.config.out_c, H_out, W_out)  # (B*(T-1), 1, H', W')
+            states_embed = states_embed.contiguous().view(
+                -1, self.config.out_c, H_out, W_out
+            )  # (B*(T-1), 1, H', W')
             actions = actions.view(-1, self.config.action_dim)  # (B*(T-1), action_dim)
 
             pred_states = self.pred(states_embed, actions)  # (B*(T-1), 1, H', W')
-            pred_states = pred_states.view(B, T - 1, self.config.out_c, H_out, W_out)  # (B, T-1, 1, H', W')
+            pred_states = pred_states.view(
+                B, T - 1, self.config.out_c, H_out, W_out
+            )  # (B, T-1, 1, H', W')
             preds[:, 1:, :, :, :] = pred_states  # Assign predictions to preds
 
-            return preds, enc_states  # preds: (B, T, 1, H', W'), enc_states: (B, T, 1, H', W')
+            return (
+                preds,
+                enc_states,
+            )  # preds: (B, T, 1, H', W'), enc_states: (B, T, 1, H', W')
 
         else:
             states_0 = states[:, 0, :, :, :]  # (B, C, H, W)
@@ -1846,8 +1925,12 @@ class ActionRegularizationJEPA2DFlexibleEncoder(BaseModel):
 
             for t in range(1, T):
                 action_t_minus1 = actions[:, t - 1, :]  # (B, action_dim)
-                state_embed_t_minus1 = preds[-1]  # Use the last predicted embedding (B, 1, H', W')
-                pred_state = self.pred(state_embed_t_minus1, action_t_minus1)  # (B, 1, H', W')
+                state_embed_t_minus1 = preds[
+                    -1
+                ]  # Use the last predicted embedding (B, 1, H', W')
+                pred_state = self.pred(
+                    state_embed_t_minus1, action_t_minus1
+                )  # (B, 1, H', W')
                 preds.append(pred_state)
 
             # Stack predictions and true encodings along the time dimension
@@ -1856,7 +1939,7 @@ class ActionRegularizationJEPA2DFlexibleEncoder(BaseModel):
             return preds
 
     def compute_mse_loss(self, preds, enc_s):
-        # preds, enc_s: (B, T, 1, H', W') 
+        # preds, enc_s: (B, T, 1, H', W')
         loss = F.mse_loss(
             preds[:, 1:], enc_s[:, 1:]
         )  # Compute MSE loss for timesteps 1 to T-1
@@ -1869,7 +1952,9 @@ class ActionRegularizationJEPA2DFlexibleEncoder(BaseModel):
         # states_embed and pred_states: (B*(T-1), 1, H', W')
         # actions: (B*(T-1), action_dim)
         # Predict actions from embedding differences
-        predicted_actions = self.action_reg_net(states_embed, pred_states)  # (B*(T-1), action_dim)
+        predicted_actions = self.action_reg_net(
+            states_embed, pred_states
+        )  # (B*(T-1), action_dim)
 
         # Compute MSE loss between predicted and actual actions
         reg_loss = F.mse_loss(predicted_actions, actions)
@@ -1942,7 +2027,6 @@ class ActionRegularizationJEPA2DFlexibleEncoder(BaseModel):
 
         return vicreg_loss, invariance_loss, variance_loss, covariance_loss
 
-
     def compute_vicreg_loss_spatial(self, preds, enc_s, gamma=1.0, epsilon=1e-4):
         """
         Compute VICReg loss with invariance, variance, and covariance terms calculated for each spatial position across channels,
@@ -1979,30 +2063,46 @@ class ActionRegularizationJEPA2DFlexibleEncoder(BaseModel):
         # --- Variance Term ---
         # Compute variance along the batch dimension (B*T) at each spatial location (H, W)
         std_Z = torch.sqrt(Z.var(dim=0, unbiased=False) + epsilon)  # Shape (C, H, W)
-        std_Z_prime = torch.sqrt(Z_prime.var(dim=0, unbiased=False) + epsilon)  # Shape (C, H, W)
+        std_Z_prime = torch.sqrt(
+            Z_prime.var(dim=0, unbiased=False) + epsilon
+        )  # Shape (C, H, W)
 
         # Penalize if standard deviation is below gamma
-        variance_loss = (
-            torch.mean(F.relu(gamma - std_Z)) + torch.mean(F.relu(gamma - std_Z_prime))
+        variance_loss = torch.mean(F.relu(gamma - std_Z)) + torch.mean(
+            F.relu(gamma - std_Z_prime)
         )
 
         # --- Covariance Term ---
         # Center the embeddings along the batch dimension
         Z_centered = Z - Z.mean(dim=0, keepdim=True)  # Shape (B*T, C, H, W)
-        Z_prime_centered = Z_prime - Z_prime.mean(dim=0, keepdim=True)  # Shape (B*T, C, H, W)
+        Z_prime_centered = Z_prime - Z_prime.mean(
+            dim=0, keepdim=True
+        )  # Shape (B*T, C, H, W)
 
         # Compute covariance at each spatial location
         # Flatten (B*T, C) for each pixel (H, W)
-        Z_centered = Z_centered.permute(2, 3, 0, 1).reshape(H * W, B * T, C)  # Shape (H*W, B*T, C)
-        Z_prime_centered = Z_prime_centered.permute(2, 3, 0, 1).reshape(H * W, B * T, C)  # Shape (H*W, B*T, C)
+        Z_centered = Z_centered.permute(2, 3, 0, 1).reshape(
+            H * W, B * T, C
+        )  # Shape (H*W, B*T, C)
+        Z_prime_centered = Z_prime_centered.permute(2, 3, 0, 1).reshape(
+            H * W, B * T, C
+        )  # Shape (H*W, B*T, C)
 
         # Compute covariance matrices for all pixels in parallel
-        cov_Z = (Z_centered.transpose(1, 2) @ Z_centered) / (B * T - 1)  # Shape (H*W, C, C)
-        cov_Z_prime = (Z_prime_centered.transpose(1, 2) @ Z_prime_centered) / (B * T - 1)  # Shape (H*W, C, C)
+        cov_Z = (Z_centered.transpose(1, 2) @ Z_centered) / (
+            B * T - 1
+        )  # Shape (H*W, C, C)
+        cov_Z_prime = (Z_prime_centered.transpose(1, 2) @ Z_prime_centered) / (
+            B * T - 1
+        )  # Shape (H*W, C, C)
 
         # Compute the sum of squared off-diagonal elements
-        cov_loss_Z = torch.sum(cov_Z**2, dim=(-2, -1)) - torch.sum(torch.diagonal(cov_Z, dim1=-2, dim2=-1) ** 2, dim=-1)
-        cov_loss_Z_prime = torch.sum(cov_Z_prime**2, dim=(-2, -1)) - torch.sum(torch.diagonal(cov_Z_prime, dim1=-2, dim2=-1) ** 2, dim=-1)
+        cov_loss_Z = torch.sum(cov_Z**2, dim=(-2, -1)) - torch.sum(
+            torch.diagonal(cov_Z, dim1=-2, dim2=-1) ** 2, dim=-1
+        )
+        cov_loss_Z_prime = torch.sum(cov_Z_prime**2, dim=(-2, -1)) - torch.sum(
+            torch.diagonal(cov_Z_prime, dim1=-2, dim2=-1) ** 2, dim=-1
+        )
 
         covariance_loss = torch.sum(cov_loss_Z + cov_loss_Z_prime) / (H * W)
 
@@ -2014,7 +2114,6 @@ class ActionRegularizationJEPA2DFlexibleEncoder(BaseModel):
         )
 
         return vicreg_loss, invariance_loss, variance_loss, covariance_loss
-
 
     def training_step(self, batch, device):
         states, actions = batch.states.to(device, non_blocking=True), batch.actions.to(
@@ -2030,25 +2129,34 @@ class ActionRegularizationJEPA2DFlexibleEncoder(BaseModel):
         pred_states = preds[:, 1:, :, :, :].reshape(
             -1, self.config.out_c, H, W
         )  # Output of predictor: (B*(T-1), 1, H, W)
-        actions = actions.reshape(-1, self.config.action_dim)  # Actions: (B*(T-1), action_dim)
+        actions = actions.reshape(
+            -1, self.config.action_dim
+        )  # Actions: (B*(T-1), action_dim)
 
         action_reg_loss = self.compute_regularization_loss(
             states_embed, pred_states, actions
         )  # Uses ActionRegularizer2D internally
 
         # Compute VICReg Loss
-        vic_reg_loss, invariance_loss, variance_loss, covariance_loss = (
-            self.compute_vicreg_loss(preds, enc_s)
-        )  # VICReg Loss Calculation
-
+        vic_reg_loss, invariance_loss, variance_loss, covariance_loss = vicreg_loss(
+                pred_states.flatten(start_dim=1, end_dim=-1), # (B, T * C * H * W)
+                states_embed.flatten(start_dim=1, end_dim=-1), # (B, T * C * H * W)
+            )
 
         # Compute VICReg Loss
-        vic_reg_loss_s, invariance_loss_s, variance_loss_s, covariance_loss_s = (
-            self.compute_vicreg_loss_spatial(preds, enc_s)
-        )  # VICReg Loss Calculation
+        vic_reg_loss_s, invariance_loss_s, variance_loss_s, covariance_loss_s = vicreg_loss(
+            pred_states.flatten(start_dim=0, end_dim=1)
+            .permute(0, 2, 3, 1)
+            .flatten(end_dim=-2), # (B * T, H * W, C)
+            states_embed.flatten(start_dim=0, end_dim=1)
+            .permute(0, 2, 3, 1)
+            .flatten(end_dim=-2), # (B * T, H * W, C)
+        )
 
         # Combine losses
-        total_loss = ((vic_reg_loss + vic_reg_loss_s) / 2) + self.config.lambda_reg * action_reg_loss
+        total_loss = (
+            (vic_reg_loss + vic_reg_loss_s)
+        ) + self.config.lambda_reg * action_reg_loss
 
         self.optimizer.zero_grad()
         total_loss.backward()
@@ -2145,13 +2253,14 @@ class ActionRegularizationJEPA2DFlexibleEncoder(BaseModel):
         }
 
         return output
-    
+
 
 import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from timm import create_model
+
 
 # Explanation:
 # This class replaces the original `Encoder` class.
@@ -2166,17 +2275,17 @@ class Encoder2Dv2(nn.Module):
         self.config = config
         # Use the same backbone as original code
         self.resnet = create_model(
-            'resnet18.a1_in1k', 
-            pretrained=False, 
-            num_classes=0, 
-            in_chans=2, 
-            features_only=True
+            "resnet18.a1_in1k",
+            pretrained=False,
+            num_classes=0,
+            in_chans=2,
+            features_only=True,
         )
 
     def forward(self, x):
         # x: (B, T, 2, H, W)
         B, T, C, H, W = x.shape
-        x = x.view(B*T, C, H, W)  # Flatten time into batch
+        x = x.view(B * T, C, H, W)  # Flatten time into batch
         features = self.resnet(x)[1]  # As in original code, take index [1]
         # Suppose features: (B*T, C', H', W')
         C_out = features.shape[1]
@@ -2199,7 +2308,7 @@ class Predictor2Dv2(nn.Module):
         self.predictor = nn.Sequential(
             nn.Conv2d(input_dim, input_dim - 2, kernel_size=3, padding=1),
             nn.ReLU(),
-            nn.Conv2d(input_dim - 2, output_dim, kernel_size=3, padding=1)
+            nn.Conv2d(input_dim - 2, output_dim, kernel_size=3, padding=1),
         )
 
     def forward(self, encoded_o_t, action):
@@ -2208,7 +2317,7 @@ class Predictor2Dv2(nn.Module):
         B, T, C, H, W = encoded_o_t.shape
 
         # Reshape action
-        action = action.view(B, T-1, 2, 1, 1)
+        action = action.view(B, T - 1, 2, 1, 1)
         action = action.repeat(1, 1, 1, H, W)  # (B, T-1, 2, H, W)
 
         predictions = []
@@ -2224,7 +2333,7 @@ class Predictor2Dv2(nn.Module):
 
 # Explanation:
 # The original code does not do action regression from embedding differences.
-# The provided template has an `ActionRegularizer2D` class and 
+# The provided template has an `ActionRegularizer2D` class and
 # mentions predicting actions from state differences, but the original code does not have this.
 # To maintain the requested format, we'll define this class but not use it.
 class ActionRegularizer2Dv2(nn.Module):
@@ -2259,6 +2368,7 @@ class ActionRegularizer2Dv2(nn.Module):
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import OneCycleLR
 
+
 class ActionRegularizationJEPA2Dv2(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -2270,14 +2380,18 @@ class ActionRegularizationJEPA2Dv2(nn.Module):
         # Create optimizer and scheduler as per original code
         params = list(self.enc.parameters()) + list(self.pred.parameters())
         self.optimizer = AdamW(params, lr=1e-3)
-        self.scheduler = OneCycleLR(self.optimizer, max_lr=1e-2, steps_per_epoch=config.steps_per_epoch, epochs=config.epochs,)
+        self.scheduler = OneCycleLR(
+            self.optimizer,
+            max_lr=1e-2,
+            steps_per_epoch=config.steps_per_epoch,
+            epochs=config.epochs,
+        )
 
         # VICReg parameters from original code
         self.inv_coeff = 25.0
         self.var_coeff = 15.0
         self.cov_coeff = 1.0
         self.gamma = 1.0
-
 
     def forward(self, states, actions, teacher_forcing=True):
         # states: (B, T, 2, H, W)
@@ -2290,7 +2404,9 @@ class ActionRegularizationJEPA2Dv2(nn.Module):
             enc_states = self.enc(states)  # (B, T, C_out, H_out, W_out)
             # Initialize predictions (same shape as enc_states)
             preds = torch.zeros_like(enc_states)  # (B, T, C_out, H_out, W_out)
-            preds[:, 0] = enc_states[:, 0]  # First predicted state is the first encoded state
+            preds[:, 0] = enc_states[
+                :, 0
+            ]  # First predicted state is the first encoded state
 
             # Use predictor to predict next states
             # The predictor expects:
@@ -2310,7 +2426,7 @@ class ActionRegularizationJEPA2Dv2(nn.Module):
             states_0 = states[:, 0]  # (B, 2, H, W)
             # Encoder expects (B, T, 2, H, W), so add a time dimension for a single step
             enc_state = self.enc(states_0.unsqueeze(1))  # (B, 1, C_out, H_out, W_out)
-            
+
             preds = [enc_state]
 
             # Predict step by step for remaining timesteps
@@ -2321,7 +2437,9 @@ class ActionRegularizationJEPA2Dv2(nn.Module):
                 # The predictor expects a sequence along T, but we have only one timestep to predict.
                 # We'll just pass a single-step sequence (T=1):
                 # actions also need a time dimension: (B,1,2)
-                pred_state = self.pred(state_embed_t_minus1, action_t_minus1.unsqueeze(1))  
+                pred_state = self.pred(
+                    state_embed_t_minus1, action_t_minus1.unsqueeze(1)
+                )
                 # pred_state: (B, 1, C_out, H_out, W_out)
 
                 preds.append(pred_state)
@@ -2330,8 +2448,6 @@ class ActionRegularizationJEPA2Dv2(nn.Module):
             preds = torch.cat(preds, dim=1)
             preds = preds.view(B, T, -1)  # (B, T, C_out*H_out*W_out)
             return preds
-
-
 
     def representation_loss(self, x, y):
         # As original VICReg: MSE loss
@@ -2355,7 +2471,9 @@ class ActionRegularizationJEPA2Dv2(nn.Module):
         # predicted_next, target_encoded: after flattening appropriately
 
         # invariance
-        inv_loss = self.inv_coeff * self.representation_loss(predicted_next, target_encoded)
+        inv_loss = self.inv_coeff * self.representation_loss(
+            predicted_next, target_encoded
+        )
 
         # variance
         var_loss_x = self.var_coeff * self.variance_loss(predicted_next, self.gamma)
@@ -2372,7 +2490,7 @@ class ActionRegularizationJEPA2Dv2(nn.Module):
             "loss": loss,
             "inv-loss": inv_loss,
             "var-loss": var_loss,
-            "cov-loss": cov_loss
+            "cov-loss": cov_loss,
         }
 
     def training_step(self, batch, device):
@@ -2391,18 +2509,28 @@ class ActionRegularizationJEPA2Dv2(nn.Module):
         # Flatten for global VICReg:
         B, Tm1, C, H, W = predicted_next.shape
         # Flatten channels + spatial:
-        pred_global = predicted_next.flatten(start_dim=1, end_dim=-1)  # (B, (T-1)*C*H*W)
-        targ_global = target_encoded.flatten(start_dim=1, end_dim=-1)  # (B, (T-1)*C*H*W)
+        pred_global = predicted_next.flatten(
+            start_dim=1, end_dim=-1
+        )  # (B, (T-1)*C*H*W)
+        targ_global = target_encoded.flatten(
+            start_dim=1, end_dim=-1
+        )  # (B, (T-1)*C*H*W)
 
         vicreg_global_metrics = self.compute_vicreg_losses(pred_global, targ_global)
 
         # Spatial-level VICReg:
         # Permute to treat each spatial location as a separate sample:
         # predicted_next_spatial: (B*(T-1)*H*W, C)
-        predicted_next_spatial = predicted_next.permute(0,1,3,4,2).flatten(end_dim=-2)  # (B*(T-1)*H*W, C)
-        target_encoded_spatial = target_encoded.permute(0,1,3,4,2).flatten(end_dim=-2)  # (B*(T-1)*H*W, C)
+        predicted_next_spatial = predicted_next.permute(0, 1, 3, 4, 2).flatten(
+            end_dim=-2
+        )  # (B*(T-1)*H*W, C)
+        target_encoded_spatial = target_encoded.permute(0, 1, 3, 4, 2).flatten(
+            end_dim=-2
+        )  # (B*(T-1)*H*W, C)
 
-        vicreg_spatial_metrics = self.compute_vicreg_losses(predicted_next_spatial, target_encoded_spatial)
+        vicreg_spatial_metrics = self.compute_vicreg_losses(
+            predicted_next_spatial, target_encoded_spatial
+        )
 
         combined_loss = vicreg_global_metrics["loss"] + vicreg_spatial_metrics["loss"]
 
@@ -2415,9 +2543,18 @@ class ActionRegularizationJEPA2Dv2(nn.Module):
         # Prepare metrics for logging
         output = {
             "loss": combined_loss.item(),
-            "inv_loss": (vicreg_global_metrics["inv-loss"].item() + vicreg_spatial_metrics["inv-loss"].item()),
-            "var_loss": (vicreg_global_metrics["var-loss"].item() + vicreg_spatial_metrics["var-loss"].item()),
-            "cov_loss": (vicreg_global_metrics["cov-loss"].item() + vicreg_spatial_metrics["cov-loss"].item()),
+            "inv_loss": (
+                vicreg_global_metrics["inv-loss"].item()
+                + vicreg_spatial_metrics["inv-loss"].item()
+            ),
+            "var_loss": (
+                vicreg_global_metrics["var-loss"].item()
+                + vicreg_spatial_metrics["var-loss"].item()
+            ),
+            "cov_loss": (
+                vicreg_global_metrics["cov-loss"].item()
+                + vicreg_spatial_metrics["cov-loss"].item()
+            ),
             "lr": self.scheduler.get_last_lr()[0],
         }
 
@@ -2454,36 +2591,47 @@ class ActionRegularizationJEPA2Dv2(nn.Module):
 class Encoder2Dv3(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.convnext = create_model('resnet18.a1_in1k', pretrained=False, num_classes=0, in_chans=2, features_only=True)
-    
+        self.convnext = create_model(
+            "resnet18.a1_in1k",
+            pretrained=False,
+            num_classes=0,
+            in_chans=2,
+            features_only=True,
+        )
+
     def forward(self, x):
         # Reshape input to merge batch and trajectory dimensions
         original_shape = x.shape
-        x = x.view(-1, *original_shape[-3:])  # Reshape to [batch*trajectory, channels, height, width]
+        x = x.view(
+            -1, *original_shape[-3:]
+        )  # Reshape to [batch*trajectory, channels, height, width]
         features = self.convnext(x)[1]
-        
+
         # Reshape features back to original trajectory structure
-        features = features.view(original_shape[0], original_shape[1], *features.shape[-3:])
+        features = features.view(
+            original_shape[0], original_shape[1], *features.shape[-3:]
+        )
         return features
+
 
 # Modify Predictor class
 class Predictor2Dv3(nn.Module):
     def __init__(self, input_dim, output_dim):
         super().__init__()
         self.predictor = nn.Sequential(
-            nn.Conv2d(input_dim, input_dim-2, kernel_size=3, padding=1),
+            nn.Conv2d(input_dim, input_dim - 2, kernel_size=3, padding=1),
             nn.ReLU(),
-            nn.Conv2d(input_dim-2, output_dim, kernel_size=3, padding=1)
+            nn.Conv2d(input_dim - 2, output_dim, kernel_size=3, padding=1),
         )
-    
+
     def forward(self, encoded_o_t, action):
         # Reshape inputs
         batch_size, trajectory_length = encoded_o_t.shape[:2]
-        
+
         # Reshape action to match encoded_o_t dimensions
-        action = action.view(batch_size, trajectory_length-1, 2, 1, 1)
+        action = action.view(batch_size, trajectory_length - 1, 2, 1, 1)
         action = action.repeat(1, 1, 1, encoded_o_t.size(3), encoded_o_t.size(4))
-        
+
         # Prepare inputs for prediction
         predictions = []
         for t in range(trajectory_length - 1):
@@ -2491,9 +2639,8 @@ class Predictor2Dv3(nn.Module):
             x = torch.cat([encoded_o_t[:, t], action[:, t]], dim=1)
             pred = self.predictor(x)
             predictions.append(pred)
-        
-        return torch.stack(predictions, dim=1)
 
+        return torch.stack(predictions, dim=1)
 
 
 class JEPA2Dv3(nn.Module):
@@ -2507,14 +2654,18 @@ class JEPA2Dv3(nn.Module):
         # Create optimizer and scheduler as per original code
         params = list(self.enc.parameters()) + list(self.pred.parameters())
         self.optimizer = AdamW(params, lr=1e-3)
-        self.scheduler = OneCycleLR(self.optimizer, max_lr=1e-2, steps_per_epoch=config.steps_per_epoch, epochs=config.epochs,)
+        self.scheduler = OneCycleLR(
+            self.optimizer,
+            max_lr=1e-2,
+            steps_per_epoch=config.steps_per_epoch,
+            epochs=config.epochs,
+        )
 
         # VICReg parameters from original code
         self.inv_coeff = 25.0
         self.var_coeff = 15.0
         self.cov_coeff = 1.0
         self.gamma = 1.0
-
 
     def forward(self, states, actions, teacher_forcing=True):
         # states: (B, T, 2, H, W)
@@ -2527,7 +2678,9 @@ class JEPA2Dv3(nn.Module):
             enc_states = self.enc(states)  # (B, T, C_out, H_out, W_out)
             # Initialize predictions (same shape as enc_states)
             preds = torch.zeros_like(enc_states)  # (B, T, C_out, H_out, W_out)
-            preds[:, 0] = enc_states[:, 0]  # First predicted state is the first encoded state
+            preds[:, 0] = enc_states[
+                :, 0
+            ]  # First predicted state is the first encoded state
 
             # Use predictor to predict next states
             # The predictor expects:
@@ -2547,7 +2700,7 @@ class JEPA2Dv3(nn.Module):
             states_0 = states[:, 0]  # (B, 2, H, W)
             # Encoder expects (B, T, 2, H, W), so add a time dimension for a single step
             enc_state = self.enc(states_0.unsqueeze(1))  # (B, 1, C_out, H_out, W_out)
-            
+
             preds = [enc_state]
 
             # Predict step by step for remaining timesteps
@@ -2558,7 +2711,9 @@ class JEPA2Dv3(nn.Module):
                 # The predictor expects a sequence along T, but we have only one timestep to predict.
                 # We'll just pass a single-step sequence (T=1):
                 # actions also need a time dimension: (B,1,2)
-                pred_state = self.pred(state_embed_t_minus1, action_t_minus1.unsqueeze(1))  
+                pred_state = self.pred(
+                    state_embed_t_minus1, action_t_minus1.unsqueeze(1)
+                )
                 # pred_state: (B, 1, C_out, H_out, W_out)
 
                 preds.append(pred_state)
@@ -2567,8 +2722,6 @@ class JEPA2Dv3(nn.Module):
             preds = torch.cat(preds, dim=1)
             preds = preds.view(B, T, -1)  # (B, T, C_out*H_out*W_out)
             return preds
-
-
 
     def representation_loss(self, x, y):
         # As original VICReg: MSE loss
@@ -2592,7 +2745,9 @@ class JEPA2Dv3(nn.Module):
         # predicted_next, target_encoded: after flattening appropriately
 
         # invariance
-        inv_loss = self.inv_coeff * self.representation_loss(predicted_next, target_encoded)
+        inv_loss = self.inv_coeff * self.representation_loss(
+            predicted_next, target_encoded
+        )
 
         # variance
         var_loss_x = self.var_coeff * self.variance_loss(predicted_next, self.gamma)
@@ -2609,7 +2764,7 @@ class JEPA2Dv3(nn.Module):
             "loss": loss,
             "inv-loss": inv_loss,
             "var-loss": var_loss,
-            "cov-loss": cov_loss
+            "cov-loss": cov_loss,
         }
 
     def training_step(self, batch, device):
@@ -2628,18 +2783,28 @@ class JEPA2Dv3(nn.Module):
         # Flatten for global VICReg:
         B, Tm1, C, H, W = predicted_next.shape
         # Flatten channels + spatial:
-        pred_global = predicted_next.flatten(start_dim=1, end_dim=-1)  # (B, (T-1)*C*H*W)
-        targ_global = target_encoded.flatten(start_dim=1, end_dim=-1)  # (B, (T-1)*C*H*W)
+        pred_global = predicted_next.flatten(
+            start_dim=1, end_dim=-1
+        )  # (B, (T-1)*C*H*W)
+        targ_global = target_encoded.flatten(
+            start_dim=1, end_dim=-1
+        )  # (B, (T-1)*C*H*W)
 
         vicreg_global_metrics = self.compute_vicreg_losses(pred_global, targ_global)
 
         # Spatial-level VICReg:
         # Permute to treat each spatial location as a separate sample:
         # predicted_next_spatial: (B*(T-1)*H*W, C)
-        predicted_next_spatial = predicted_next.permute(0,1,3,4,2).flatten(end_dim=-2)  # (B*(T-1)*H*W, C)
-        target_encoded_spatial = target_encoded.permute(0,1,3,4,2).flatten(end_dim=-2)  # (B*(T-1)*H*W, C)
+        predicted_next_spatial = predicted_next.permute(0, 1, 3, 4, 2).flatten(
+            end_dim=-2
+        )  # (B*(T-1)*H*W, C)
+        target_encoded_spatial = target_encoded.permute(0, 1, 3, 4, 2).flatten(
+            end_dim=-2
+        )  # (B*(T-1)*H*W, C)
 
-        vicreg_spatial_metrics = self.compute_vicreg_losses(predicted_next_spatial, target_encoded_spatial)
+        vicreg_spatial_metrics = self.compute_vicreg_losses(
+            predicted_next_spatial, target_encoded_spatial
+        )
 
         combined_loss = vicreg_global_metrics["loss"] + vicreg_spatial_metrics["loss"]
 
@@ -2652,9 +2817,18 @@ class JEPA2Dv3(nn.Module):
         # Prepare metrics for logging
         output = {
             "loss": combined_loss.item(),
-            "inv_loss": (vicreg_global_metrics["inv-loss"].item() + vicreg_spatial_metrics["inv-loss"].item()),
-            "var_loss": (vicreg_global_metrics["var-loss"].item() + vicreg_spatial_metrics["var-loss"].item()),
-            "cov_loss": (vicreg_global_metrics["cov-loss"].item() + vicreg_spatial_metrics["cov-loss"].item()),
+            "inv_loss": (
+                vicreg_global_metrics["inv-loss"].item()
+                + vicreg_spatial_metrics["inv-loss"].item()
+            ),
+            "var_loss": (
+                vicreg_global_metrics["var-loss"].item()
+                + vicreg_spatial_metrics["var-loss"].item()
+            ),
+            "cov_loss": (
+                vicreg_global_metrics["cov-loss"].item()
+                + vicreg_spatial_metrics["cov-loss"].item()
+            ),
             "lr": self.scheduler.get_last_lr()[0],
         }
 
@@ -2685,7 +2859,6 @@ class JEPA2Dv3(nn.Module):
         }
 
         return output
-
 
 
 # Model mapping and get_model function
