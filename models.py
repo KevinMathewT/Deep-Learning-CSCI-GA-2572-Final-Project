@@ -1845,6 +1845,7 @@ class FlexibleEncoder2D(nn.Module):
         # Select the layer closest to 16x16
         self.closest_layer_index = self._find_closest_layer()
 
+        
         input_ch = self.feature_channels[self.closest_layer_index]
         self.channel_adjust = nn.Conv2d(input_ch, config.out_c, kernel_size=1)
 
@@ -1865,6 +1866,7 @@ class FlexibleEncoder2D(nn.Module):
         
         # Reshape features back to original trajectory structure
         features = features.view(original_shape[0], *features.shape[-3:])
+        features = self.channel_adjust(features)
         return features
 
 
