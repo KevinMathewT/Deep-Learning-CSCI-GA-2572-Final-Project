@@ -53,7 +53,7 @@ class VICRegLoss(nn.Module):
             self.cov_coeff * (self.covariance_loss(x) + self.covariance_loss(y)) / 2
         )
         metrics["loss"] = sum(metrics.values())
-        return metrics
+        return metrics["loss"], metrics["inv-loss"], metrics["var-loss"], metrics["cov-loss"]
 
     @staticmethod
     def representation_loss(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
