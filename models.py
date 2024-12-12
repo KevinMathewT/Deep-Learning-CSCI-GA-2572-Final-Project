@@ -1888,7 +1888,6 @@ class ActionRegularizationJEPA2DFlexibleEncoder(BaseModel):
     def forward(self, states, actions, teacher_forcing=True):
         B, _, C, H, W = states.shape  # states: (B, T, C, H, W)
         T = actions.shape[1] + 1  # Number of timesteps | actions: (B, T-1, action_dim)
-        print(f'teacher_forcing: {teacher_forcing}')
 
         if teacher_forcing:
             states = states.view(B * T, C, H, W)  # Reshape to (B*T, C, H, W)
@@ -1922,7 +1921,6 @@ class ActionRegularizationJEPA2DFlexibleEncoder(BaseModel):
             )  # preds: (B, T, C', H', W'), enc_states: (B, T, C', H', W')
 
         else:
-            print('came here')
             states_0 = states[:, 0, :, :, :]  # (B, C, H, W)
             enc_state = self.enc(states_0)  # (B, C', H', W')
             preds = [enc_state]  # List to store predictions
@@ -1968,7 +1966,7 @@ class ActionRegularizationJEPA2DFlexibleEncoder(BaseModel):
         states, actions = batch.states.to(device, non_blocking=True), batch.actions.to(
             device, non_blocking=True
         )
-        preds, enc_s = self.forward(states, actions, teacher_forcing=True)  # preds, enc_s: (B, T, 1, H, W)
+        preds, enc_s = self.forward(states, actions, teacher_forcing=self.config.teacher_forcing)  # preds, enc_s: (B, T, 1, H, W)
 
         # Compute regularization loss
         B, T, _, H, W = enc_s.shape  # (B, T, 1, H, W)
