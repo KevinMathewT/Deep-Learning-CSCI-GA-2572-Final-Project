@@ -2141,6 +2141,7 @@ class ActionRegularizationJEPA2DFlexibleEncoder(BaseModel):
         ), actions
         )  # Uses ActionRegularizer2D internally
 
+        print(f"states_embed: {states_embed.shape} | states_embed.flatten: {states_embed.flatten(start_dim=1, end_dim=-1).shape}")
         # Compute VICReg Loss
         vic_reg_loss, invariance_loss, variance_loss, covariance_loss = vicreg_loss(
                 pred_states.flatten(start_dim=1, end_dim=-1), # (B, T * C * H * W)
