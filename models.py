@@ -2141,25 +2141,25 @@ class ActionRegularizationJEPA2DFlexibleEncoder(BaseModel):
         ), actions
         )  # Uses ActionRegularizer2D internally
 
-        # # Compute VICReg Loss
-        # vic_reg_loss, invariance_loss, variance_loss, covariance_loss = vicreg_loss(
-        #         pred_states.flatten(start_dim=1, end_dim=-1), # (B, T * C * H * W)
-        #         states_embed.flatten(start_dim=1, end_dim=-1), # (B, T * C * H * W)
-        #     )
+        # Compute VICReg Loss
+        vic_reg_loss, invariance_loss, variance_loss, covariance_loss = vicreg_loss(
+                pred_states.flatten(start_dim=1, end_dim=-1), # (B, T * C * H * W)
+                states_embed.flatten(start_dim=1, end_dim=-1), # (B, T * C * H * W)
+            )
 
-        # # Compute VICReg Loss
-        # vic_reg_loss_s, invariance_loss_s, variance_loss_s, covariance_loss_s = vicreg_loss(
-        #     pred_states.flatten(start_dim=0, end_dim=1)
-        #     .permute(0, 2, 3, 1)
-        #     .flatten(end_dim=-2), # (B * T, H * W, C)
-        #     states_embed.flatten(start_dim=0, end_dim=1)
-        #     .permute(0, 2, 3, 1)
-        #     .flatten(end_dim=-2), # (B * T, H * W, C)
-        # )
+        # Compute VICReg Loss
+        vic_reg_loss_s, invariance_loss_s, variance_loss_s, covariance_loss_s = vicreg_loss(
+            pred_states.flatten(start_dim=0, end_dim=1)
+            .permute(0, 2, 3, 1)
+            .flatten(end_dim=-2), # (B * T, H * W, C)
+            states_embed.flatten(start_dim=0, end_dim=1)
+            .permute(0, 2, 3, 1)
+            .flatten(end_dim=-2), # (B * T, H * W, C)
+        )
 
         # Combine losses
         total_loss = (
-            0 # (vic_reg_loss + vic_reg_loss_s)
+            (vic_reg_loss + vic_reg_loss_s)
         ) + self.config.lambda_reg * action_reg_loss
 
         self.optimizer.zero_grad()
@@ -2199,12 +2199,12 @@ class ActionRegularizationJEPA2DFlexibleEncoder(BaseModel):
             "action_weight_abs": action_weight_abs,
             # "deviation_from_identity_pred_final_proj": deviation_from_identity.item(),
             "action_reg_loss": action_reg_loss.item(),
-            # "invariance_loss": invariance_loss,
-            # "variance_loss": variance_loss,
-            # "covariance_loss": covariance_loss,
-            # "invariance_loss_s": invariance_loss_s,
-            # "variance_loss_s": variance_loss_s,
-            # "covariance_loss_s": covariance_loss_s,
+            "invariance_loss": invariance_loss,
+            "variance_loss": variance_loss,
+            "covariance_loss": covariance_loss,
+            "invariance_loss_s": invariance_loss_s,
+            "variance_loss_s": variance_loss_s,
+            "covariance_loss_s": covariance_loss_s,
         }
 
         # Non-loggable data

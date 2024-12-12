@@ -116,6 +116,7 @@ class VICRegLoss(nn.Module):
             The covariance loss.
                 Shape of [1,].
         """
+        print(x.size())
         x = x - x.mean(dim=0)
         cov = (x.T @ x) / (x.shape[0] - 1)
         cov_loss = cov.fill_diagonal_(0.0).pow(2).sum() / x.shape[1]
