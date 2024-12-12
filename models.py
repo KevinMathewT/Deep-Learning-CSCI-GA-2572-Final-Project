@@ -1865,7 +1865,7 @@ class FlexibleEncoder2D(nn.Module):
         # Reshape input to merge batch and trajectory dimensions
         original_shape = x.shape
         x = x.view(-1, *original_shape[-3:])  # Reshape to [batch*trajectory, channels, height, width]
-        features = self.convnext(x)[1]
+        features = self.backbone(x)[1]
         
         # Reshape features back to original trajectory structure
         features = features.view(original_shape[0], original_shape[1], *features.shape[-3:])
