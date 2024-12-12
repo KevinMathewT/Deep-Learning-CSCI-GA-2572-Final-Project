@@ -1862,6 +1862,7 @@ class FlexibleEncoder2D(nn.Module):
         return closest_index
 
     def forward(self, x):
+        print(x.shape)
         # Reshape input to merge batch and trajectory dimensions
         original_shape = x.shape
         x = x.view(-1, *original_shape[-3:])  # Reshape to [batch*trajectory, channels, height, width]
