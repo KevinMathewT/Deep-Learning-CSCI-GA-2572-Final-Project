@@ -22,4 +22,5 @@ vicreg_loss:
   mu_variance: 15
   nu_covariance: 1
 
-encoder_backbone: resnet18.a1_in1k
+# encoder_backbone: resnet18.a1_in1k
+encoder_backbone: resnet101d.ra2_in1k
