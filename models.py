@@ -7,7 +7,6 @@ import torch
 import timm
 
 from optimizer import get_optimizer, get_scheduler
-from loss import vicreg_loss
 from configs import JEPAConfig
 
 from typing import Dict
