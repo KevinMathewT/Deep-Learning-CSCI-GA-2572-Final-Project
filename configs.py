@@ -145,4 +145,5 @@ class JEPAConfig(ConfigBase):
     lambda_reg: int = 0.2
     delta_gen: int = 1
     encoder_backbone: str = "resnet18.a1_in1k"
+    teacher_forcing: str = 'False'
     # You can add more configuration parameters as needed
