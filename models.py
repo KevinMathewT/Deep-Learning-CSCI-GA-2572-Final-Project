@@ -1885,7 +1885,7 @@ class ActionRegularizationJEPA2DFlexibleEncoder(BaseModel):
         self.config = config
         self.repr_dim = config.embed_dim * config.out_c
 
-    def forward(self, states, actions, teacher_forcing=True, return_enc=False):
+    def forward(self, states, actions, teacher_forcing=True, return_enc=False, pred_flattened=True):
         B, _, C, H, W = states.shape  # states: (B, T, C, H, W)
         T = actions.shape[1] + 1  # Number of timesteps | actions: (B, T-1, action_dim)
 
@@ -1936,7 +1936,8 @@ class ActionRegularizationJEPA2DFlexibleEncoder(BaseModel):
 
             # Stack predictions and true encodings along the time dimension
             preds = torch.stack(preds, dim=1)  # (B, T, C', H', W')
-            preds = preds.view(B, T, -1)  # (B, T, C'*H'*W')
+            if pred_flattened:
+                preds = preds.view(B, T, -1)  # (B, T, C'*H'*W')
 
             if return_enc:
                 states = states.view(B * T, C, H, W)
@@ -1974,7 +1975,13 @@ class ActionRegularizationJEPA2DFlexibleEncoder(BaseModel):
         states, actions = batch.states.to(device, non_blocking=True), batch.actions.to(
             device, non_blocking=True
         )
-        preds, enc_s = self.forward(states, actions, teacher_forcing=self.config.teacher_forcing, return_enc=True)  # preds, enc_s: (B, T, 1, H, W)
+        preds, enc_s = self.forward(
+            states, 
+            actions, 
+            teacher_forcing=self.config.teacher_forcing, 
+            return_enc=True, 
+            pred_flattened=False
+        )  # preds, enc_s: (B, T, 1, H, W)
 
         # Compute regularization loss
         B, T, _, H, W = enc_s.shape  # (B, T, 1, H, W)
@@ -2070,7 +2077,13 @@ class ActionRegularizationJEPA2DFlexibleEncoder(BaseModel):
 
     def validation_step(self, batch):
         states, actions = batch.states, batch.actions
-        preds, enc_s = self.forward(states, actions, teacher_forcing=self.config.teacher_forcing, return_enc=True)  # preds, enc_s: (B, T, 1, H, W)
+        preds, enc_s = self.forward(
+            states, 
+            actions, 
+            teacher_forcing=self.config.teacher_forcing, 
+            return_enc=True, 
+            pred_flattened=False
+        )  # preds, enc_s: (B, T, 1, H, W)
 
         # Compute MSE Loss
         loss = self.compute_mse_loss(preds, enc_s)  # preds, enc_s: (B, T, 1, H, W)
