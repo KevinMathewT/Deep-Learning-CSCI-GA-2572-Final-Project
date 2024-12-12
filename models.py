@@ -1894,8 +1894,8 @@ class ActionRegularizationJEPA2DFlexibleEncoder(BaseModel):
         if teacher_forcing:
             states = states.view(B * T, C, H, W)  # Reshape to (B*T, C, H, W)
 
-            enc_states = self.enc(states)  # (B*T, 1, H', W')
-            _, _, C_out, H_out, W_out = enc_states.shape
+            enc_states = self.enc(states)  # (B*T, C', H', W')
+            _, C_out, H_out, W_out = enc_states.shape
             enc_states = enc_states.view(
                 B, T, C_out, H_out, W_out
             )  # (B, T, C', H', W')
