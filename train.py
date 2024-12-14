@@ -4,7 +4,7 @@ import wandb
 from accelerate import Accelerator
 import torch
 from dataset import WallDataset
-from main import evaluate_model, load_data
+from main import evaluate_model, load_data, load_expert_data
 from models import get_model
 from tqdm import tqdm
 import numpy as np
@@ -92,9 +92,10 @@ def train_jepa(config):
 
     # prober setup
     probe_train_ds, probe_val_ds = load_data(acc.device)
+    probe_train_expert_ds, probe_val_expert_ds = load_expert_data(acc.device)
     
     for epoch in range(config.epochs):
-        step, avg_epoch_loss = train_one_epoch(epoch, model, tdl, vdl, acc, step, config, probe_train_ds, probe_val_ds, k=2)
+        step, avg_epoch_loss = train_one_epoch(epoch, model, tdl, vdl, acc, step, config, probe_train_ds, probe_val_ds, probe_train_expert_ds, probe_val_expert_ds, k=2)
         acc.print(f"[{epoch + 1}/{config.epochs}] train epoch loss: {avg_epoch_loss:.5f}")        
 
     # acc.save_state(f"weights/{config.model_type}_model_weights")
