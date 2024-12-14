@@ -25,6 +25,75 @@ def build_mlp(layers_dims: List[int]):
     layers.append(nn.Linear(layers_dims[-2], layers_dims[-1]))
     return nn.Sequential(*layers)
 
+def analyze_backbone(config):
+    """Print detailed parameter and feature analysis of the backbone."""
+    print("\n" + "="*50)
+    print(f"Backbone Analysis for {config.encoder_backbone}")
+    print("="*50)
+    
+    input_size = 65
+    backbone = timm.create_model(
+        config.encoder_backbone,
+        pretrained=False,
+        num_classes=0,
+        in_chans=2,
+        features_only=True,
+    )
+    
+    # Get feature info
+    feature_info = backbone.feature_info
+    reductions = [input_size // info['reduction'] for info in feature_info]
+    
+    # Calculate target output size
+    output_side = int(math.sqrt(config.embed_dim / config.out_c))
+    
+    # Find closest layer
+    closest_index = min(range(len(reductions)), 
+                       key=lambda i: abs(reductions[i] - output_side))
+
+    print(f"\nTarget output size: {output_side}x{output_side}")
+    print("\nFeature map sizes:")
+    print("-"*50)
+
+    # Get all named parameters and their modules
+    all_params = {name: param.numel() for name, param in backbone.named_parameters()}
+    
+    # Initialize counters for each stage
+    stages_params = [0] * len(feature_info)
+    
+    # For each feature stage, find all parameters that belong to its modules
+    for i, info in enumerate(feature_info):
+        module_path = info['module']
+        # Count parameters in this module and its children
+        for name, param_count in all_params.items():
+            if module_path in name or (i == 0 and not any(info['module'] in name for info in feature_info)):
+                stages_params[i] += param_count
+
+    # Print info for each stage
+    total_found_params = 0
+    for i, info in enumerate(feature_info):
+        size = reductions[i]
+        channels = info['num_chs']
+        params = stages_params[i]
+        total_found_params += params
+        used = "←― SELECTED" if i == closest_index else ""
+        print(f"Stage {i}: {size:2d}x{size:2d}, {channels:4d} channels, {params:10,} params   {used}")
+
+    # Verify against total parameters
+    total_actual_params = sum(p.numel() for p in backbone.parameters())
+    if total_found_params != total_actual_params:
+        print(f"\nWarning: Found {total_found_params:,} params but model has {total_actual_params:,} params")
+
+    print("\n" + "-"*50)
+    print(f"Using feature level: {closest_index}")
+    
+    # Sum parameters up to and including the closest index
+    used_params = sum(stages_params[:closest_index + 1])
+    print(f"Parameters actually used: {used_params:,}")
+    print("="*50 + "\n")
+    
+    return closest_index, used_params
+
 
 class MockModel(torch.nn.Module):
     """
@@ -1818,6 +1887,10 @@ class FlexibleEncoder2D(nn.Module):
         super().__init__()
         self.config = config
         self.repr_dim = config.embed_dim * config.out_c
+
+        # Print backbone stats
+        closest_layer_index, used_params = analyze_backbone(config)
+        self.closest_layer_index = closest_layer_index
 
         # Ensure output size is consistent
         self.output_side = int(
