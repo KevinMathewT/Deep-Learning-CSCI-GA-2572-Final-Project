@@ -69,28 +69,17 @@ def log_files():
 
 
 
+import timm
+import torch
+from timm.models.helpers import FeatureHooks
+
 def create_minimal_feature_model(config, feature_index):
     """
-    Create a minimal feature extraction model that provides the exact output
-    for the specified feature_index as TIMM does with features_only=True.
+    Use TIMM's FeatureHooks to capture the exact features extracted 
+    at the specified feature_index. This avoids truncating the model 
+    and ensures identical behavior to TIMM's `features_only=True`.
     """
-    # Step 1: Create the full model with features_only=True
-    full_model = timm.create_model(
-        config.encoder_backbone,
-        pretrained=False,
-        num_classes=0,
-        in_chans=config.in_c,
-        features_only=True
-    )
-
-    selected_feature_layer = full_model.feature_info[feature_index]['module']
-    selected_feature_channels = full_model.feature_info[feature_index]['num_chs']
-
-    # Clean up full_model
-    del full_model
-    gc.collect()
-
-    # Step 2: Create the base model
+    # Step 1: Create the full model (without features_only)
     base_model = timm.create_model(
         config.encoder_backbone,
         pretrained=False,
@@ -98,62 +87,32 @@ def create_minimal_feature_model(config, feature_index):
         in_chans=config.in_c
     )
 
-    # Parse the selected_feature_layer path
-    path_parts = selected_feature_layer.split('.')
+    # Step 2: Get feature information from a features_only model
+    full_model = timm.create_model(
+        config.encoder_backbone,
+        pretrained=False,
+        num_classes=0,
+        in_chans=config.in_c,
+        features_only=True
+    )
+    feature_info = full_model.feature_info
+    selected_feature_layer = feature_info[feature_index]['module']
+    selected_feature_channels = feature_info[feature_index]['num_chs']
+    del full_model
 
-    def set_identities_after(module, parts):
-        if not parts:
-            return
-        part = parts[0]
-        if part.isdigit():
-            idx = int(part)
-            if isinstance(module, (nn.Sequential, nn.ModuleList)):
-                for i, (n, m) in enumerate(module.named_children()):
-                    if i == idx:
-                        set_identities_after(m, parts[1:])
-                    elif i > idx:
-                        setattr(module, n, nn.Identity())
-            else:
-                raise ValueError(f"Expected a sequential-like module at '{part}', got {type(module)}")
-        else:
-            if not hasattr(module, part):
-                raise ValueError(f"Module '{part}' not found in {module}")
-            found = False
-            for n, m in module.named_children():
-                if n == part:
-                    set_identities_after(m, parts[1:])
-                    found = True
-                elif found:
-                    setattr(module, n, nn.Identity())
+    # Step 3: Use FeatureHooks to capture output at the exact layer
+    feature_layers = [selected_feature_layer]  # Layers to hook
+    hook = FeatureHooks([getattr(base_model, layer) for layer in feature_layers])
 
-    set_identities_after(base_model, path_parts)
-
-    def get_module_by_path(mod, parts):
-        if not parts:
-            return mod
-        return get_module_by_path(getattr(mod, parts[0]), parts[1:])
-
-    target_module = get_module_by_path(base_model, path_parts)
-
-    captured_features = {}
-
-    def hook_fn(m, i, o):
-        captured_features['out'] = o
-
-    hook = target_module.register_forward_hook(hook_fn)
-
-    original_forward = base_model.forward
-
-    # Define modified_forward to accept self as the first arg
+    # Step 4: Define a modified forward method to capture hook outputs
     def modified_forward(self, x):
-        _ = original_forward(x)
-        return captured_features['out']
+        _ = self._original_forward(x)
+        # Return hooked feature outputs
+        return hook.output[0]
 
-    # Bind the method to base_model
+    # Save the original forward method and override with the modified one
+    base_model._original_forward = base_model.forward
     base_model.forward = modified_forward.__get__(base_model, type(base_model))
-
-    del target_module
-    gc.collect()
 
     return base_model, selected_feature_channels
 
