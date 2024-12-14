@@ -68,14 +68,62 @@ def log_files():
     return collected_files
 
 
+
+def set_identities_after(module, target_name_parts):
+    """
+    In-place modifies `module` so that all layers after the path specified by 
+    `target_name_parts` are replaced with nn.Identity().
+    
+    target_name_parts is a list of strings that represent the path to the target layer.
+    For example, if target_name_parts = ["layer1", "0"], it means module.layer1[0].
+    """
+    if not target_name_parts:
+        # No more parts, means we've reached the target module.
+        # Replace all subsequent siblings in this module's parent with Identity is handled at parent level.
+        return
+
+    part = target_name_parts[0]
+
+    # Check if part is a digit (index in sequential) or a named submodule
+    if part.isdigit():
+        # Indexing into a sequential container
+        idx = int(part)
+        # Ensure module is sequential-like
+        children = list(module.named_children())
+        for i, (n, m) in enumerate(children):
+            if i == idx:
+                # Recurse into this child to find the deeper target if remaining parts exist
+                set_identities_after(m, target_name_parts[1:])
+            elif i > idx:
+                # After reaching the target, set all subsequent layers to Identity
+                setattr(module, n, nn.Identity())
+    else:
+        # Named submodule
+        if not hasattr(module, part):
+            raise ValueError(f"Module '{part}' not found in {module}")
+        # Get all children to know what comes after `part`
+        children = list(module.named_children())
+        found = False
+        for i, (n, m) in enumerate(children):
+            if n == part:
+                # Found the submodule we need to dive into
+                set_identities_after(m, target_name_parts[1:])
+                found = True
+            elif found:
+                # After the target submodule, set everything to Identity
+                setattr(module, n, nn.Identity())
+
+        # If we never found `part`, just return (it might be a leaf module)
+        # This should not happen if the path is correct.
+
+
 def create_minimal_feature_model(config, feature_index):
     """
-    Create a minimal feature extraction model that provides the output
-    for the specified feature_index (e.g., self.backbone(x)[feature_index]).
-
-    Ensures the input and output shapes are consistent with the full model.
+    Create a minimal feature extraction model by replacing all layers after the 
+    specified feature_index layer with nn.Identity(), preserving the original model structure.
     """
-    # Step 1: Create the full model with features_only=True
+
+    # Step 1: Create the full model with features_only=True to get feature info
     full_model = timm.create_model(
         config.encoder_backbone,
         pretrained=False,
@@ -84,7 +132,6 @@ def create_minimal_feature_model(config, feature_index):
         features_only=True
     )
 
-    # Step 2: Extract the specific layer corresponding to backbone(x)[feature_index]
     selected_feature_layer = full_model.feature_info[feature_index]['module']
     selected_feature_channels = full_model.feature_info[feature_index]['num_chs']
 
@@ -92,7 +139,7 @@ def create_minimal_feature_model(config, feature_index):
     del full_model
     gc.collect()
 
-    # Step 3: Create the base model
+    # Step 2: Create the base (full) model without features_only
     base_model = timm.create_model(
         config.encoder_backbone,
         pretrained=False,
@@ -100,70 +147,19 @@ def create_minimal_feature_model(config, feature_index):
         in_chans=config.in_c
     )
 
-    def extract_submodel(module, path_parts):
-        """
-        Recursively extract a submodel from `module` using `path_parts`.
-        `path_parts` is a list of strings where each part is either:
-        - a submodule name (e.g., 'layer1')
-        - a numeric index for sequential containers (e.g., '1').
-        """
-        if not path_parts:
-            return module
-
-        part = path_parts[0]
-        remaining = path_parts[1:]
-
-        if part.isdigit():
-            # Handle numeric indexing for sequential modules
-            idx = int(part)
-            if isinstance(module, (nn.Sequential, nn.ModuleList)):
-                truncated = OrderedDict()
-                for i, (n, m) in enumerate(module.named_children()):
-                    truncated[n] = m
-                    if i == idx:
-                        if remaining:
-                            truncated[n] = extract_submodel(m, remaining)
-                        break
-                return nn.Sequential(truncated)
-            else:
-                raise ValueError(f"Expected a sequential-like module at '{part}', got {type(module)}")
-        else:
-            # Handle named submodules
-            if not hasattr(module, part):
-                raise ValueError(f"Module '{part}' not found in {module}")
-
-            submod = getattr(module, part)
-            if remaining:
-                submod = extract_submodel(submod, remaining)
-
-            # Rebuild top-level module with truncated children
-            new_odict = OrderedDict()
-            found = False
-            for n, m in module.named_children():
-                new_odict[n] = m
-                if n == part:
-                    # Replace the last module with the truncated version
-                    new_odict[n] = submod
-                    found = True
-                    break
-            if not found:
-                return submod
-
-            # Return a container with all layers up to 'part'
-            if isinstance(module, nn.Sequential):
-                return nn.Sequential(new_odict)
-            else:
-                return nn.Sequential(new_odict)
-
-    # Parse the selected feature layer path and extract the minimal model
+    # Parse the selected feature layer path
+    # e.g. "layer1" or "blocks.1"
     path_parts = selected_feature_layer.split('.')
-    minimal_model = extract_submodel(base_model, path_parts)
 
-    # Clean up base_model to save memory
-    del base_model
+    # Step 3: Set identities after the target layer
+    # We'll traverse the model's top-level modules similarly as we did before.
+    set_identities_after(base_model, path_parts)
+
+    # Cleanup memory
     gc.collect()
 
-    return minimal_model, selected_feature_channels
+    # Return the modified model along with the number of channels at that feature layer
+    return base_model, selected_feature_channels
 
 
 

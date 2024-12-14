@@ -58,8 +58,6 @@ def train_one_epoch(
             #     step=step,
             # )
 
-        step += 1
-
         # Print loss for every 5th batch or first/last batch
         if i == 0 or (i + 1) % 5 == 0 or i == (len(tdl) - 1):
             acc.print(
@@ -100,13 +98,17 @@ def train_one_epoch(
                     f"Saved best wall model with normal loss {avg_losses['normal']:.5f} and wall loss {best_wall_loss:.5f} at {wall_model_path}"
                 )
 
+            wandb.log(avg_losses, step=step)
+
             acc.print(f"-------------------------------------------------------------")
 
+        step += 1
+
     avg_epoch_loss = total_loss / len(tdl)
-    avg_losses.update({"avg_epoch_train_loss": avg_epoch_loss, "epoch": epoch + 1})
+    info_dict = {"avg_epoch_train_loss": avg_epoch_loss, "epoch": epoch + 1}
 
     # Log avg_epoch_train_loss at the end of the epoch
-    wandb.log(avg_losses, step=step)
+    wandb.log(info_dict, step=step)
 
     return step, avg_epoch_loss
 
