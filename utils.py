@@ -101,8 +101,8 @@ def create_minimal_feature_model(config, feature_index):
     )
 
     # Step 3: Construct named_modules dictionary
-    # Convert the generator from `named_modules()` into a dictionary
-    named_modules = dict(base_model.named_modules())
+    # Use a custom filtering approach to ensure valid names
+    named_modules = {name: module for name, module in base_model.named_modules() if name}
 
     # Ensure the selected feature layer exists in the base model
     if selected_feature_layer not in named_modules:
@@ -111,7 +111,7 @@ def create_minimal_feature_model(config, feature_index):
     # Step 4: Use TIMM's FeatureHooks to capture the exact outputs
     hooks = FeatureHooks(
         hooks=[selected_feature_layer],  # List of target layer names
-        named_modules=named_modules      # Dictionary of all named modules in the base model
+        named_modules=named_modules      # Valid dictionary of named modules
     )
 
     # Wrap the base model's forward function to capture features
