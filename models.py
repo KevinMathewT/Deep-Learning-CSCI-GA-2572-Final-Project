@@ -1833,6 +1833,7 @@ class FlexibleEncoder2D(nn.Module):
             num_classes=0,  # No classifier head
             in_chans=2,  # Input has 2 channels
             features_only=True,  # Extract spatial features
+            out_indices=(1,),  # Only keep up to layer1
         )
 
         # Inspect available feature maps
@@ -1861,7 +1862,7 @@ class FlexibleEncoder2D(nn.Module):
         # Reshape input to merge batch and trajectory dimensions
         original_shape = x.shape
         x = x.view(-1, *original_shape[-3:])  # Reshape to [batch*trajectory, channels, height, width]
-        features = self.backbone(x)[1]
+        features = self.backbone(x)[0]
         
         # Reshape features back to original trajectory structure
         features = features.view(original_shape[0], *features.shape[-3:])
