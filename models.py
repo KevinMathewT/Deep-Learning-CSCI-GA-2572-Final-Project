@@ -8,7 +8,6 @@ import timm
 
 from optimizer import get_optimizer, get_scheduler
 from configs import JEPAConfig
-from utils import create_minimal_feature_model
 
 from typing import Dict
 
@@ -32,10 +31,12 @@ class MockModel(torch.nn.Module):
     Does nothing. Just for testing.
     """
 
-    def __init__(self, device="cuda", output_dim=256):
+    def __init__(self, device="cuda", bs=64, n_steps=17, output_dim=256):
         super().__init__()
         self.device = device
-        self.repr_dim = output_dim
+        self.bs = bs
+        self.n_steps = n_steps
+        self.repr_dim = 256
 
     def forward(self, states, actions):
         """
@@ -49,9 +50,7 @@ class MockModel(torch.nn.Module):
         Output:
             predictions: [B, T, D]
         """
-        B, T, _ = actions.shape
-
-        return torch.randn((B, T + 1, self.repr_dim)).to(self.device)
+        return torch.randn((self.bs, self.n_steps, self.repr_dim)).to(self.device)
 
 
 class Prober(torch.nn.Module):
@@ -1818,30 +1817,57 @@ class FlexibleEncoder2D(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
+        self.repr_dim = config.embed_dim * config.out_c
 
-        feature_index = config.feature_index  # e.g., 1 for self.backbone(x)[1]
-        self.backbone, input_ch = create_minimal_feature_model(config, feature_index)
+        # Ensure output size is consistent
+        self.output_side = int(
+            math.sqrt(self.repr_dim / config.out_c)
+        )  # Should be 16 for config.embed_dim=256
+        # if self.output_side != 16:
+        #     raise ValueError("Output side must be 16 for config.embed_dim=256.")
+
+        # Dynamically select backbone based on config.encoder_backbone
+        self.backbone = timm.create_model(
+            config.encoder_backbone,  # Example: 'resnet18.a1_in1k'
+            pretrained=False,  # No pretraining allowed
+            num_classes=0,  # No classifier head
+            in_chans=2,  # Input has 2 channels
+            features_only=True,  # Extract spatial features
+        )
+
+        # Inspect available feature maps
+        self.feature_channels = [info["num_chs"] for info in self.backbone.feature_info]
+        self.feature_shapes = [
+            info["reduction"] for info in self.backbone.feature_info
+        ]  # Spatial size reductions
+
+        # Select the layer closest to 16x16
+        self.closest_layer_index = self._find_closest_layer()
+
+        
+        input_ch = self.feature_channels[self.closest_layer_index]
         self.channel_adjust = nn.Conv2d(input_ch, config.out_c, kernel_size=1)
+
+    def _find_closest_layer(self):
+        # Find the layer whose spatial size is closest to output_side
+        input_size = 65  # Assumes input spatial dimensions (H, W) = 65x65
+        reductions = [input_size // red for red in self.feature_shapes]
+        closest_index = min(
+            range(len(reductions)), key=lambda i: abs(reductions[i] - self.output_side)
+        )
+        return closest_index
 
     def forward(self, x):
         # Reshape input to merge batch and trajectory dimensions
         original_shape = x.shape
         x = x.view(-1, *original_shape[-3:])  # Reshape to [batch*trajectory, channels, height, width]
-        features = self.backbone(x)  # Extract features
+        features = self.backbone(x)[1]
+        
+        # Reshape features back to original trajectory structure
         features = features.view(original_shape[0], *features.shape[-3:])
-        features = self.channel_adjust(features)  # Adjust channels
+        features = self.channel_adjust(features)
         return features
 
-    # def forward(self, x):
-    #     # Reshape input to merge batch and trajectory dimensions
-    #     original_shape = x.shape
-    #     x = x.view(-1, *original_shape[-3:])  # Reshape to [batch*trajectory, channels, height, width]
-    #     features = self.backbone(x)[1]
-        
-    #     # Reshape features back to original trajectory structure
-    #     features = features.view(original_shape[0], *features.shape[-3:])
-    #     features = self.channel_adjust(features)
-    #     return features
 
 class ActionRegularizationJEPA2DFlexibleEncoder(BaseModel):
     def __init__(self, config):
