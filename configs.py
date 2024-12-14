@@ -1,6 +1,6 @@
 import argparse
 import dataclasses
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Iterable, Tuple, Union, cast, List
 
@@ -140,7 +140,7 @@ class JEPAConfig(ConfigBase):
     learning_rate: float = 0.001
     model_type: str = 'JEPA'
     data_path: str = '/scratch/DL24FA/train'
-    vicreg_loss: VicRegConfig = VicRegConfig()
+    vicreg_loss: VicRegConfig = field(default_factory=VicRegConfig)
     action_reg_hidden_dim: str = '32'
     lambda_reg: int = 0.2
     delta_gen: int = 1
