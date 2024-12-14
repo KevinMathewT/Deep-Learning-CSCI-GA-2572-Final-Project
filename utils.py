@@ -69,61 +69,12 @@ def log_files():
 
 
 
-def set_identities_after(module, target_name_parts):
-    """
-    In-place modifies `module` so that all layers after the path specified by 
-    `target_name_parts` are replaced with nn.Identity().
-    
-    target_name_parts is a list of strings that represent the path to the target layer.
-    For example, if target_name_parts = ["layer1", "0"], it means module.layer1[0].
-    """
-    if not target_name_parts:
-        # No more parts, means we've reached the target module.
-        # Replace all subsequent siblings in this module's parent with Identity is handled at parent level.
-        return
-
-    part = target_name_parts[0]
-
-    # Check if part is a digit (index in sequential) or a named submodule
-    if part.isdigit():
-        # Indexing into a sequential container
-        idx = int(part)
-        # Ensure module is sequential-like
-        children = list(module.named_children())
-        for i, (n, m) in enumerate(children):
-            if i == idx:
-                # Recurse into this child to find the deeper target if remaining parts exist
-                set_identities_after(m, target_name_parts[1:])
-            elif i > idx:
-                # After reaching the target, set all subsequent layers to Identity
-                setattr(module, n, nn.Identity())
-    else:
-        # Named submodule
-        if not hasattr(module, part):
-            raise ValueError(f"Module '{part}' not found in {module}")
-        # Get all children to know what comes after `part`
-        children = list(module.named_children())
-        found = False
-        for i, (n, m) in enumerate(children):
-            if n == part:
-                # Found the submodule we need to dive into
-                set_identities_after(m, target_name_parts[1:])
-                found = True
-            elif found:
-                # After the target submodule, set everything to Identity
-                setattr(module, n, nn.Identity())
-
-        # If we never found `part`, just return (it might be a leaf module)
-        # This should not happen if the path is correct.
-
-
 def create_minimal_feature_model(config, feature_index):
     """
-    Create a minimal feature extraction model by replacing all layers after the 
-    specified feature_index layer with nn.Identity(), preserving the original model structure.
+    Create a minimal feature extraction model that provides the exact output
+    for the specified feature_index as TIMM does with features_only=True.
     """
-
-    # Step 1: Create the full model with features_only=True to get feature info
+    # Step 1: Create the full model with features_only=True to get feature_info
     full_model = timm.create_model(
         config.encoder_backbone,
         pretrained=False,
@@ -132,14 +83,15 @@ def create_minimal_feature_model(config, feature_index):
         features_only=True
     )
 
+    # Use TIMM's feature_info to identify the exact module for the given feature_index
     selected_feature_layer = full_model.feature_info[feature_index]['module']
     selected_feature_channels = full_model.feature_info[feature_index]['num_chs']
 
-    # Clean up full_model to save memory
+    # Clean up full_model
     del full_model
     gc.collect()
 
-    # Step 2: Create the base (full) model without features_only
+    # Step 2: Create the base model (no features_only)
     base_model = timm.create_model(
         config.encoder_backbone,
         pretrained=False,
@@ -147,18 +99,73 @@ def create_minimal_feature_model(config, feature_index):
         in_chans=config.in_c
     )
 
-    # Parse the selected feature layer path
-    # e.g. "layer1" or "blocks.1"
+    # Parse the selected_feature_layer path (e.g., 'layer1', 'blocks.1', etc.)
     path_parts = selected_feature_layer.split('.')
 
-    # Step 3: Set identities after the target layer
-    # We'll traverse the model's top-level modules similarly as we did before.
+    # A helper function to replace layers after the target layer with nn.Identity()
+    def set_identities_after(module, parts):
+        if not parts:
+            return
+        part = parts[0]
+        if part.isdigit():
+            idx = int(part)
+            # module must be sequential-like
+            if isinstance(module, (nn.Sequential, nn.ModuleList)):
+                for i, (n, m) in enumerate(module.named_children()):
+                    if i == idx:
+                        set_identities_after(m, parts[1:])
+                    elif i > idx:
+                        setattr(module, n, nn.Identity())
+            else:
+                raise ValueError(f"Expected a sequential-like module at '{part}', got {type(module)}")
+        else:
+            if not hasattr(module, part):
+                raise ValueError(f"Module '{part}' not found in {module}")
+            found = False
+            for n, m in module.named_children():
+                if n == part:
+                    set_identities_after(m, parts[1:])
+                    found = True
+                elif found:
+                    # After the target layer, replace subsequent layers with Identity
+                    setattr(module, n, nn.Identity())
+
+    # Apply the truncation to the base model
     set_identities_after(base_model, path_parts)
 
-    # Cleanup memory
+    # To ensure we get the exact same output as TIMM at the selected layer, 
+    # we register a forward hook on that layer. This is how TIMM captures features internally.
+    def get_module_by_path(mod, parts):
+        if not parts:
+            return mod
+        return get_module_by_path(getattr(mod, parts[0]), parts[1:])
+
+    target_module = get_module_by_path(base_model, path_parts)
+
+    # We'll store the output in this dictionary
+    captured_features = {}
+
+    def hook_fn(m, i, o):
+        captured_features['out'] = o
+
+    # Register the hook on the exact module
+    hook = target_module.register_forward_hook(hook_fn)
+
+    # Wrap the base_model forward to return captured features
+    original_forward = base_model.forward
+
+    def modified_forward(x):
+        _ = original_forward(x)
+        return captured_features['out']
+
+    base_model.forward = modified_forward.__get__(base_model, type(base_model))
+
+    # Cleanup
+    del target_module
     gc.collect()
 
-    # Return the modified model along with the number of channels at that feature layer
+    # Return the truncated model and the number of channels
+    # Now calling base_model(input) will return exactly what TIMM would for that feature_index
     return base_model, selected_feature_channels
 
 
