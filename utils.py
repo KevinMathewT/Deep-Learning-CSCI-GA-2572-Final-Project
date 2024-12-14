@@ -100,31 +100,29 @@ def create_minimal_feature_model(config, feature_index):
         in_chans=config.in_c
     )
 
-    # Step 3: Get named modules and find the target module
-    named_modules = list(base_model.named_modules())  # List of (name, module) tuples
-    target_named_module = None
+    # Map feature_info module names to actual submodules in the base model
+    def get_named_modules(module):
+        """Recursively get all named modules in the model."""
+        named_modules = {}
+        for name, submodule in module.named_modules():
+            named_modules[name] = submodule
+        return named_modules
 
-    for name, module in named_modules:
-        if name == selected_feature_layer:
-            target_named_module = (name, module)
-            break
+    named_modules = get_named_modules(base_model)
 
-    if target_named_module is None:
+    # Ensure the selected feature layer exists in the base model
+    if selected_feature_layer not in named_modules:
         raise ValueError(f"Selected feature layer '{selected_feature_layer}' not found in the model.")
 
-    # Step 4: Use TIMM's FeatureHooks to capture the exact outputs
-    # Pass both the list of module objects and their names
-    hooks = FeatureHooks(
-        modules=[target_named_module[1]],  # List of module objects
-        named_modules={target_named_module[0]: target_named_module[1]}  # Dict of {name: module}
-    )
+    # Step 3: Use TIMM's FeatureHooks to capture the exact outputs
+    hooks = FeatureHooks(named_modules)
 
     # Wrap the base model's forward function to capture features
     original_forward = base_model.forward
 
     def modified_forward(self, x):
         _ = original_forward(x)  # Run the forward pass
-        return hooks.output[0]  # Extract the hooked output (list with single element)
+        return hooks.get_output([selected_feature_layer])[0]  # Extract the hooked output
 
     # Assign the modified forward method to the model
     base_model.forward = modified_forward.__get__(base_model, type(base_model))
