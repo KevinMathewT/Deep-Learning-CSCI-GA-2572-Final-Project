@@ -15,6 +15,7 @@ import torch
 import torch.nn as nn
 
 import timm
+from timm.models.features import FeatureHooks
 
 
 def seed_everything(seed=42):
@@ -69,25 +70,12 @@ def log_files():
 
 
 
-import timm
-import torch
-from timm.models.helpers import FeatureHooks
-
 def create_minimal_feature_model(config, feature_index):
     """
-    Use TIMM's FeatureHooks to capture the exact features extracted 
-    at the specified feature_index. This avoids truncating the model 
-    and ensures identical behavior to TIMM's `features_only=True`.
+    Create a minimal feature extraction model that provides the exact output
+    for the specified feature_index using TIMM's FeatureHooks mechanism.
     """
-    # Step 1: Create the full model (without features_only)
-    base_model = timm.create_model(
-        config.encoder_backbone,
-        pretrained=False,
-        num_classes=0,
-        in_chans=config.in_c
-    )
-
-    # Step 2: Get feature information from a features_only model
+    # Step 1: Create the full model with features_only=True to get feature_info
     full_model = timm.create_model(
         config.encoder_backbone,
         pretrained=False,
@@ -95,27 +83,50 @@ def create_minimal_feature_model(config, feature_index):
         in_chans=config.in_c,
         features_only=True
     )
-    feature_info = full_model.feature_info
-    selected_feature_layer = feature_info[feature_index]['module']
-    selected_feature_channels = feature_info[feature_index]['num_chs']
+
+    # Extract feature_info for the selected feature index
+    selected_feature_layer = full_model.feature_info[feature_index]['module']
+    selected_feature_channels = full_model.feature_info[feature_index]['num_chs']
+
+    # Clean up full_model (not needed after extracting feature_info)
     del full_model
+    gc.collect()
 
-    # Step 3: Use FeatureHooks to capture output at the exact layer
-    feature_layers = [selected_feature_layer]  # Layers to hook
-    hook = FeatureHooks([getattr(base_model, layer) for layer in feature_layers])
+    # Step 2: Create the base model (no features_only)
+    base_model = timm.create_model(
+        config.encoder_backbone,
+        pretrained=False,
+        num_classes=0,
+        in_chans=config.in_c
+    )
 
-    # Step 4: Define a modified forward method to capture hook outputs
+    # Parse the selected feature layer path and resolve the exact module
+    path_parts = selected_feature_layer.split('.')
+
+    def get_module_by_path(module, parts):
+        """Traverse the module hierarchy to find the exact submodule."""
+        if not parts:
+            return module
+        return get_module_by_path(getattr(module, parts[0]), parts[1:])
+
+    # Get the exact module corresponding to the selected feature layer
+    target_module = get_module_by_path(base_model, path_parts)
+
+    # Step 3: Use TIMM's FeatureHooks to capture the exact outputs
+    hooks = FeatureHooks([target_module], hook_type='forward')
+
+    # Wrap the base model's forward function to capture features
+    original_forward = base_model.forward
+
     def modified_forward(self, x):
-        _ = self._original_forward(x)
-        # Return hooked feature outputs
-        return hook.output[0]
+        _ = original_forward(x)  # Run the forward pass
+        return hooks.get_output([feature_index])[0]  # Extract the hooked output
 
-    # Save the original forward method and override with the modified one
-    base_model._original_forward = base_model.forward
+    # Assign the modified forward method to the model
     base_model.forward = modified_forward.__get__(base_model, type(base_model))
 
+    # Return the base model and the number of channels for the selected feature layer
     return base_model, selected_feature_channels
-
 
 
 
