@@ -77,7 +77,7 @@ def create_minimal_feature_model(config, feature_index):
         config.encoder_backbone,
         pretrained=False,
         num_classes=0,
-        in_chans=config.in_c,
+        in_chans=config.in_chans,
         features_only=True
     )
 
@@ -90,18 +90,18 @@ def create_minimal_feature_model(config, feature_index):
         config.encoder_backbone,
         pretrained=False,
         num_classes=0,
-        in_chans=config.in_c
+        in_chans=config.in_chans
     )
 
     # Step 4: Extract the required layers for the minimal model
     layers = []
     for name, module in base_model.named_children():
-        layers.append((name, module))
+        layers.append(module)
         if name == selected_feature_layer:
             break
 
-    # Build the minimal model
-    minimal_model = nn.Sequential(nn.ModuleDict(layers))
+    # Build the minimal model using nn.Sequential
+    minimal_model = nn.Sequential(*layers)
 
     # Cleanup unnecessary variables to save memory
     del full_model, base_model, selected_feature_layer
