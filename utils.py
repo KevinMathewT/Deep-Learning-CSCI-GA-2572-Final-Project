@@ -113,7 +113,11 @@ def create_minimal_feature_model(config, feature_index):
         raise ValueError(f"Selected feature layer '{selected_feature_layer}' not found in the model.")
 
     # Step 4: Use TIMM's FeatureHooks to capture the exact outputs
-    hooks = FeatureHooks([target_named_module])  # Pass a list of (name, module) tuples
+    # Pass both the list of module objects and their names
+    hooks = FeatureHooks(
+        modules=[target_named_module[1]],  # List of module objects
+        named_modules={target_named_module[0]: target_named_module[1]}  # Dict of {name: module}
+    )
 
     # Wrap the base model's forward function to capture features
     original_forward = base_model.forward
