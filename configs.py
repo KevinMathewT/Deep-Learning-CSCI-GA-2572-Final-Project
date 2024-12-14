@@ -148,4 +148,5 @@ class JEPAConfig(ConfigBase):
     teacher_forcing: str = 'True'
     return_enc: str = 'True'
     pred_flattened: str = 'False'
+    feature_index: int = 1
     # You can add more configuration parameters as needed

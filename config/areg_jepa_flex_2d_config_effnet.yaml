@@ -20,3 +20,4 @@ vicreg_loss:
   nu_covariance: 1
 
 encoder_backbone: efficientnet_b0.ra_in1k
+feature_index: 1

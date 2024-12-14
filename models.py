@@ -1818,28 +1818,17 @@ class FlexibleEncoder2D(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
-        self.repr_dim = config.embed_dim * config.out_c
 
-        # Ensure output size is consistent
-        self.output_side = int(
-            math.sqrt(self.repr_dim / config.out_c)
-        )  # Should be 16 for config.embed_dim=256
-
-        # Create minimal feature model using external function
-        self.backbone, input_ch = create_minimal_feature_model(config, self.output_side)
-
-        # Channel adjustment to match the output channel dimension
+        feature_index = config.feature_index  # e.g., 1 for self.backbone(x)[1]
+        self.backbone, input_ch = create_minimal_feature_model(config, feature_index)
         self.channel_adjust = nn.Conv2d(input_ch, config.out_c, kernel_size=1)
 
     def forward(self, x):
         # Reshape input to merge batch and trajectory dimensions
         original_shape = x.shape
         x = x.view(-1, *original_shape[-3:])  # Reshape to [batch*trajectory, channels, height, width]
-        features = self.backbone(x)[1]
-        
-        # Reshape features back to original trajectory structure
-        features = features.view(original_shape[0], *features.shape[-3:])
-        features = self.channel_adjust(features)
+        features = self.backbone(x)  # Extract features
+        features = self.channel_adjust(features)  # Adjust channels
         return features
 
 
