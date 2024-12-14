@@ -7,6 +7,7 @@ import torch
 import glob
 import os
 from pathspec import PathSpec
+from collections import OrderedDict
 import subprocess
 
 import gc
@@ -85,6 +86,9 @@ def create_minimal_feature_model(config, feature_index):
     selected_feature_layer = full_model.feature_info[feature_index]['module']
     selected_feature_channels = full_model.feature_info[feature_index]['num_chs']
 
+    del full_model
+    gc.collect()
+
     # Step 3: Create the base model
     base_model = timm.create_model(
         config.encoder_backbone,
@@ -96,15 +100,32 @@ def create_minimal_feature_model(config, feature_index):
     # Step 4: Extract the required layers for the minimal model
     layers = []
     for name, module in base_model.named_children():
-        layers.append(module)
-        if name == selected_feature_layer:
+        if name == 'blocks':
+            # We need to go inside 'blocks' and only add layers up to 'blocks.1'
+            sublayers = []
+            for i, subblock in enumerate(module.children()):
+                sublayers.append((str(i), subblock))
+                # If we've reached the target sub-block, stop
+                if f'blocks.{i}' == selected_feature_layer:
+                    break
+            # Create a partial blocks module
+            partial_blocks = nn.Sequential(OrderedDict(sublayers))
+            layers.append(('blocks', partial_blocks))
             break
+        else:
+            # Add layers until we reach the 'blocks' module
+            layers.append((name, module))
+            # If the selected feature layer were before 'blocks', 
+            # you'd break here (but in this case it's within 'blocks').
+    
+    del base_model
+    gc.collect()
 
     # Build the minimal model using nn.Sequential
-    minimal_model = nn.Sequential(*layers)
+    minimal_model = nn.Sequential(OrderedDict(layers))
 
     # Cleanup unnecessary variables to save memory
-    del full_model, base_model, selected_feature_layer
+    del selected_feature_layer
     gc.collect()  # Free up memory
 
     return minimal_model, selected_feature_channels

@@ -1832,6 +1832,16 @@ class FlexibleEncoder2D(nn.Module):
         features = self.channel_adjust(features)  # Adjust channels
         return features
 
+    # def forward(self, x):
+    #     # Reshape input to merge batch and trajectory dimensions
+    #     original_shape = x.shape
+    #     x = x.view(-1, *original_shape[-3:])  # Reshape to [batch*trajectory, channels, height, width]
+    #     features = self.backbone(x)[1]
+        
+    #     # Reshape features back to original trajectory structure
+    #     features = features.view(original_shape[0], *features.shape[-3:])
+    #     features = self.channel_adjust(features)
+    #     return features
 
 class ActionRegularizationJEPA2DFlexibleEncoder(BaseModel):
     def __init__(self, config):
