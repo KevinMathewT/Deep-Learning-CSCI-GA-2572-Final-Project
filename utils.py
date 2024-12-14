@@ -9,6 +9,12 @@ import os
 from pathspec import PathSpec
 import subprocess
 
+import gc
+import torch
+import torch.nn as nn
+
+import timm
+
 
 def seed_everything(seed=42):
     """Set random seed for reproducibility."""
@@ -59,6 +65,60 @@ def log_files():
                     collected_files.append(os.path.relpath(os.path.join(root, file)))
 
     return collected_files
+
+
+def create_minimal_feature_model(config, output_side):
+    """
+    Create a minimal feature extraction model based on the configuration
+    and output spatial size.
+    """
+    # Step 1: Create the full model with features_only=True
+    full_model = timm.create_model(
+        config.encoder_backbone,
+        pretrained=False,
+        num_classes=0,
+        in_chans=config.in_chans,
+        features_only=True
+    )
+
+    # Step 2: Inspect feature information
+    feature_info = full_model.feature_info
+    feature_shapes = [info["reduction"] for info in feature_info]
+    feature_channels = [info["num_chs"] for info in feature_info]
+
+    # Step 3: Find the closest layer to the desired output side
+    input_size = 65  # Assumes input spatial dimensions (H, W) = 65x65
+    reductions = [input_size // red for red in feature_shapes]
+    closest_index = min(
+        range(len(reductions)), key=lambda i: abs(reductions[i] - output_side)
+    )
+
+    # Step 4: Extract the required layers for the minimal model
+    selected_feature_layer = feature_info[closest_index]['module']
+    base_model = timm.create_model(
+        config.encoder_backbone,
+        pretrained=False,
+        num_classes=0,
+        in_chans=config.in_chans
+    )
+
+    layers = []
+    for name, module in base_model.named_children():
+        layers.append((name, module))
+        if name == selected_feature_layer:
+            break
+
+    # Build and return the minimal model with selected layers and metadata
+    minimal_model = nn.Sequential(nn.ModuleDict(layers))
+    selected_feature_channels = feature_channels[closest_index]
+
+    # Cleanup unnecessary variables to save memory
+    del full_model, feature_info, feature_shapes, feature_channels
+    del reductions, closest_index, selected_feature_layer, base_model
+    gc.collect()  # Run garbage collection to free memory
+
+    return minimal_model, selected_feature_channels
+
 
 
 def log_embeddings_wandb(epoch, batch_idx, batch_states, batch_actions, enc_embeddings, pred_embeddings, timesteps=[0, 2, 4], phase="train", step=None):

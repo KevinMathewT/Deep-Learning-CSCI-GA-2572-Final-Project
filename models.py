@@ -8,6 +8,7 @@ import timm
 
 from optimizer import get_optimizer, get_scheduler
 from configs import JEPAConfig
+from utils import create_minimal_feature_model
 
 from typing import Dict
 
@@ -1823,46 +1824,18 @@ class FlexibleEncoder2D(nn.Module):
         self.output_side = int(
             math.sqrt(self.repr_dim / config.out_c)
         )  # Should be 16 for config.embed_dim=256
-        # if self.output_side != 16:
-        #     raise ValueError("Output side must be 16 for config.embed_dim=256.")
 
-        # Dynamically select backbone based on config.encoder_backbone
-        self.backbone = timm.create_model(
-            config.encoder_backbone,  # Example: 'resnet18.a1_in1k'
-            pretrained=False,  # No pretraining allowed
-            num_classes=0,  # No classifier head
-            in_chans=2,  # Input has 2 channels
-            features_only=True,  # Extract spatial features
-            out_indices=(1,),  # Only keep up to layer1
-        )
+        # Create minimal feature model using external function
+        self.backbone, input_ch = create_minimal_feature_model(config, self.output_side)
 
-        # Inspect available feature maps
-        self.feature_channels = [info["num_chs"] for info in self.backbone.feature_info]
-        self.feature_shapes = [
-            info["reduction"] for info in self.backbone.feature_info
-        ]  # Spatial size reductions
-
-        # Select the layer closest to 16x16
-        self.closest_layer_index = self._find_closest_layer()
-
-        
-        input_ch = self.feature_channels[self.closest_layer_index]
+        # Channel adjustment to match the output channel dimension
         self.channel_adjust = nn.Conv2d(input_ch, config.out_c, kernel_size=1)
-
-    def _find_closest_layer(self):
-        # Find the layer whose spatial size is closest to output_side
-        input_size = 65  # Assumes input spatial dimensions (H, W) = 65x65
-        reductions = [input_size // red for red in self.feature_shapes]
-        closest_index = min(
-            range(len(reductions)), key=lambda i: abs(reductions[i] - self.output_side)
-        )
-        return closest_index
 
     def forward(self, x):
         # Reshape input to merge batch and trajectory dimensions
         original_shape = x.shape
         x = x.view(-1, *original_shape[-3:])  # Reshape to [batch*trajectory, channels, height, width]
-        features = self.backbone(x)[0]
+        features = self.backbone(x)[1]
         
         # Reshape features back to original trajectory structure
         features = features.view(original_shape[0], *features.shape[-3:])
