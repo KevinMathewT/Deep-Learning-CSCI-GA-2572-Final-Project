@@ -101,7 +101,8 @@ def create_minimal_feature_model(config, feature_index):
     )
 
     # Step 3: Construct named_modules dictionary
-    named_modules = dict(base_model.named_modules())  # Convert generator to a dictionary
+    # Convert the generator from `named_modules()` into a dictionary
+    named_modules = dict(base_model.named_modules())
 
     # Ensure the selected feature layer exists in the base model
     if selected_feature_layer not in named_modules:
