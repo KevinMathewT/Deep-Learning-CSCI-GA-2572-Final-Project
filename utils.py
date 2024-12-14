@@ -88,6 +88,10 @@ def create_minimal_feature_model(config, feature_index):
     selected_feature_layer = full_model.feature_info[feature_index]['module']
     selected_feature_channels = full_model.feature_info[feature_index]['num_chs']
 
+    # Debugging: Print feature info and selected layer
+    print("Selected Feature Layer:", selected_feature_layer)
+    print("Feature Info:", full_model.feature_info)
+
     # Clean up full_model (not needed after extracting feature_info)
     del full_model
     gc.collect()
@@ -101,12 +105,14 @@ def create_minimal_feature_model(config, feature_index):
     )
 
     # Step 3: Construct named_modules dictionary
-    # Use a custom filtering approach to ensure valid names
     named_modules = {name: module for name, module in base_model.named_modules() if name}
 
-    # Ensure the selected feature layer exists in the base model
+    # Debugging: Check if selected feature layer is in named_modules
     if selected_feature_layer not in named_modules:
-        raise ValueError(f"Selected feature layer '{selected_feature_layer}' not found in the model.")
+        print("Available Layers in named_modules:")
+        for name in named_modules.keys():
+            print(name)
+        raise ValueError(f"Selected feature layer '{selected_feature_layer}' not found in named_modules.")
 
     # Step 4: Use TIMM's FeatureHooks to capture the exact outputs
     hooks = FeatureHooks(
