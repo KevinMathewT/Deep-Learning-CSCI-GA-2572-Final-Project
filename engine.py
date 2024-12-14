@@ -9,6 +9,7 @@ from main import evaluate_model
 
 best_normal_loss = float("inf")
 best_wall_loss = float("inf")
+best_expert_loss = float("inf")
 
 
 def train_one_epoch(
@@ -82,21 +83,32 @@ def train_one_epoch(
             # Check and save the best model for "normal"
             if avg_losses["normal"] < best_normal_loss:
                 best_normal_loss = avg_losses["normal"]
-                normal_model_path = f"weights/best_normal_model_epoch_{epoch + 1}_train_iter_{i}_normal_loss_{best_normal_loss:.5f}_wall_loss_{avg_losses['wall']:.5f}.pt"
+                normal_model_path = f"weights/best_normal_model_epoch_{epoch + 1}_train_iter_{i}_normal_loss_{avg_losses["normal"]:.5f}_wall_loss_{avg_losses['wall']:.5f}.pt"
                 acc.save(model.state_dict(), normal_model_path)
                 wandb.save(normal_model_path)
                 acc.print(
-                    f"Saved best normal model with normal loss {best_normal_loss:.5f} and wall loss {avg_losses['wall']:.5f} at {normal_model_path}"
+                    f"Saved best wall model with normal loss {avg_losses['normal']:.5f}, wall loss {avg_losses['wall']:.5f} and expert loss {avg_expert_losses["expert"]:.5f} at {wall_model_path}"
                 )
 
             # Check and save the best model for "wall"
             if avg_losses["wall"] < best_wall_loss:
                 best_wall_loss = avg_losses["wall"]
-                wall_model_path = f"weights/best_wall_model_epoch_{epoch + 1}_train_iter_{i}_normal_loss_{avg_losses['normal']:.5f}_wall_loss_{best_wall_loss:.5f}.pt"
+                wall_model_path = f"weights/best_wall_model_epoch_{epoch + 1}_train_iter_{i}_normal_loss_{avg_losses['normal']:.5f}_wall_loss_{avg_losses['wall']:.5f}.pt"
                 acc.save(model.state_dict(), wall_model_path)
                 wandb.save(wall_model_path)
                 acc.print(
-                    f"Saved best wall model with normal loss {avg_losses['normal']:.5f} and wall loss {best_wall_loss:.5f} at {wall_model_path}"
+                    f"Saved best wall model with normal loss {avg_losses['normal']:.5f}, wall loss {avg_losses['wall']:.5f} and expert loss {avg_expert_losses["expert"]:.5f} at {wall_model_path}"
+                )
+
+            
+            # Check and save the best model for "expert"
+            if avg_expert_losses["expert"] < best_expert_loss:
+                best_expert_loss = avg_expert_losses["expert"]
+                expert_model_path = f"weights/best_expert_model_epoch_{epoch + 1}_train_iter_{i}_normal_loss_{avg_losses['normal']:.5f}_wall_loss_{avg_losses['wall']:.5f}.pt"
+                acc.save(model.state_dict(), expert_model_path)
+                wandb.save(expert_model_path)
+                acc.print(
+                    f"Saved best wall model with normal loss {avg_losses['normal']:.5f}, wall loss {avg_losses['wall']:.5f} and expert loss {avg_expert_losses["expert"]:.5f} at {wall_model_path}"
                 )
 
             wandb.log(avg_losses, step=step)
