@@ -61,7 +61,7 @@ def setup(config):
     print(f"\nModel Parameters:")
     print(f"Total parameters: {total_params:,}")
     print(f"Trainable parameters: {trainable_params:,}\n")
-    
+
     # Prepare the components with the Accelerator
     model, tdl, vdl = acc.prepare(model, tdl, vdl)
     return acc, model, tdl, vdl
@@ -117,6 +117,7 @@ def train_jepa(config):
 # python -m train --config config/areg_jepa_2d_config_adamw_linear.yaml
 # python -m train --config config/areg_jepa_flex_2d_config.yaml
 # python -m train --config config/areg_jepa_2d_v2.yaml
+# python -m train --config config/areg_jepa_flex_2d_config_effnet.yaml
 def main():
     parser = argparse.ArgumentParser(description='Train different models.')
     parser.add_argument('--config', type=str, help='Path to configuration file')
