@@ -77,7 +77,7 @@ def create_minimal_feature_model(config, feature_index):
         config.encoder_backbone,
         pretrained=False,
         num_classes=0,
-        in_chans=config.in_chans,
+        in_chans=config.in_c,
         features_only=True
     )
 
@@ -90,7 +90,7 @@ def create_minimal_feature_model(config, feature_index):
         config.encoder_backbone,
         pretrained=False,
         num_classes=0,
-        in_chans=config.in_chans
+        in_chans=config.in_c
     )
 
     # Step 4: Extract the required layers for the minimal model
