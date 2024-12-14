@@ -100,20 +100,9 @@ def create_minimal_feature_model(config, feature_index):
         in_chans=config.in_c
     )
 
-    # Parse the selected feature layer path and resolve the exact module
-    path_parts = selected_feature_layer.split('.')
-
-    def get_module_by_path(module, parts):
-        """Traverse the module hierarchy to find the exact submodule."""
-        if not parts:
-            return module
-        return get_module_by_path(getattr(module, parts[0]), parts[1:])
-
-    # Get the exact module corresponding to the selected feature layer
-    target_module = get_module_by_path(base_model, path_parts)
-
     # Step 3: Use TIMM's FeatureHooks to capture the exact outputs
-    hooks = FeatureHooks([target_module])  # Removed hook_type argument
+    # Pass the exact module name from feature_info
+    hooks = FeatureHooks([selected_feature_layer])  # Pass the name of the module as a string
 
     # Wrap the base model's forward function to capture features
     original_forward = base_model.forward
