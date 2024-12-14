@@ -112,6 +112,7 @@ def train_one_epoch(
                 )
 
             wandb.log(avg_losses, step=step)
+            wandb.log(avg_expert_losses, step=step)
 
             acc.print(f"-------------------------------------------------------------")
 
