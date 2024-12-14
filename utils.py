@@ -113,14 +113,14 @@ def create_minimal_feature_model(config, feature_index):
     target_module = get_module_by_path(base_model, path_parts)
 
     # Step 3: Use TIMM's FeatureHooks to capture the exact outputs
-    hooks = FeatureHooks([target_module], hook_type='forward')
+    hooks = FeatureHooks([target_module])  # Removed hook_type argument
 
     # Wrap the base model's forward function to capture features
     original_forward = base_model.forward
 
     def modified_forward(self, x):
         _ = original_forward(x)  # Run the forward pass
-        return hooks.get_output([feature_index])[0]  # Extract the hooked output
+        return hooks.output[0]  # Extract the hooked output (list with single element)
 
     # Assign the modified forward method to the model
     base_model.forward = modified_forward.__get__(base_model, type(base_model))
