@@ -100,22 +100,18 @@ def create_minimal_feature_model(config, feature_index):
         in_chans=config.in_c
     )
 
-    # Map feature_info module names to actual submodules in the base model
-    def get_named_modules(module):
-        """Recursively get all named modules in the model."""
-        named_modules = {}
-        for name, submodule in module.named_modules():
-            named_modules[name] = submodule
-        return named_modules
-
-    named_modules = get_named_modules(base_model)
+    # Step 3: Collect named modules for FeatureHooks
+    named_modules = {name: module for name, module in base_model.named_modules()}
 
     # Ensure the selected feature layer exists in the base model
     if selected_feature_layer not in named_modules:
         raise ValueError(f"Selected feature layer '{selected_feature_layer}' not found in the model.")
 
-    # Step 3: Use TIMM's FeatureHooks to capture the exact outputs
-    hooks = FeatureHooks(named_modules)
+    # Step 4: Use TIMM's FeatureHooks to capture the exact outputs
+    hooks = FeatureHooks(
+        hooks=[selected_feature_layer],  # Name of the target layer to hook
+        named_modules=named_modules      # Dictionary of all named modules in the base model
+    )
 
     # Wrap the base model's forward function to capture features
     original_forward = base_model.forward
