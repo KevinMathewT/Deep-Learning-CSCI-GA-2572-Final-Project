@@ -1828,6 +1828,7 @@ class FlexibleEncoder2D(nn.Module):
         original_shape = x.shape
         x = x.view(-1, *original_shape[-3:])  # Reshape to [batch*trajectory, channels, height, width]
         features = self.backbone(x)  # Extract features
+        features = features.view(original_shape[0], *features.shape[-3:])
         features = self.channel_adjust(features)  # Adjust channels
         return features
 
