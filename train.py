@@ -54,6 +54,13 @@ def setup(config):
     print("---------------- Model Summary ----------------")
     print(model)
     print("----------------------------------------------")
+
+    #Model Parameters
+    total_params = sum(p.numel() for p in model.parameters())
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"\nModel Parameters:")
+    print(f"Total parameters: {total_params:,}")
+    print(f"Trainable parameters: {trainable_params:,}\n")
     
     # Prepare the components with the Accelerator
     model, tdl, vdl = acc.prepare(model, tdl, vdl)
