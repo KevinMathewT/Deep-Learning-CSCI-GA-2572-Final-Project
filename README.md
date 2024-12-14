@@ -131,6 +131,9 @@ Just run `python main.py` to evaluate your model.
 
 
 ### Submission
+
+#### Format
+
 Create the zipped version of following folder for submission:
 
 ```
@@ -138,14 +141,44 @@ DL_Final_Proj/
 ├── main.py    
 ├── evaluator.py    
 ├── ... (other files including your new ones)    
-├── model_weights.pth    
+├── model_weights.pth  
+├── requirements.txt  
+├── metrics.txt     
 └── team_name.txt  
 ```
 
 Make sure `main.py` is runnable with your trained model, including python command load your model weights. 
 
+If your code requires additional packages, add them to `requirements.txt`. No need to include `torch` unless your code requires a specific version.
+
+metrics.txt contains 5 lines - 
+```
+probe_normal val loss: {your loss}
+probe_wall val loss: {your loss}
+probe_wall_other val loss: {your loss}
+probe_expert val loss: {your loss}
+# number of trainable parameters of your model
+# training command to replicate your submitted model
+```
+
 team_name.txt contains the name of your team and members' NETIDs.
 
-Upload the zipped file to cloud storage and email the download link to TA wz1232@nyu.edu with subject line **"DL Final Project Submission. {Team Name}"**. The TA should be able to run `wget {link}`, unzip the folder, and run `python main.py` to get validation results. Failing to do so will result in substracted scores or even zero points. 
+Either email the zipped file directly (if size is permitted) or upload it to any cloud storage and email the download link to TA wz1232@nyu.edu with subject line **"DL Final Project Submission. {Team Name}"**. 
 
-**Submission deadline is 12/14 11:59PM**. Winners will be picked and asked to present their work on last class day 12/18.
+#### Requirements
+
+The TA should be able to execute the following commands to validate your submission:
+
+1. Download the file directly or `wget {link}`
+2. Unzip the folder
+3. Install dependencies: `pip install -r requirements.txt` (if applicable)
+4. Run the evaluation script: `python main.py`
+5. Run the training script given in `metrics.txt`
+
+If the evaluation script or training script fails to execute correctly on the first try, your team's rank will be reduced by 3 positions.
+
+Every subsequent failure after follow-up with the team will result in an additonal reduction of 3 positions. With maximum of 3 attempts. After that team gets placed on the bottom rank.
+
+It is recommended to test your submission on a clean environment before submitting to ensure all required dependencies are included and that your scripts run as expected.
+
+**Submission deadline is 12/16 9:00AM**. Winners will be picked and asked to present their work on last class day 12/18.
