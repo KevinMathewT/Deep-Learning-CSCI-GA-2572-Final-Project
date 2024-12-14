@@ -72,6 +72,8 @@ def create_minimal_feature_model(config, feature_index):
     """
     Create a minimal feature extraction model that provides the output
     for the specified feature_index (e.g., self.backbone(x)[feature_index]).
+
+    Ensures the input and output shapes are consistent with the full model.
     """
     # Step 1: Create the full model with features_only=True
     full_model = timm.create_model(
@@ -86,6 +88,7 @@ def create_minimal_feature_model(config, feature_index):
     selected_feature_layer = full_model.feature_info[feature_index]['module']
     selected_feature_channels = full_model.feature_info[feature_index]['num_chs']
 
+    # Clean up full_model to save memory
     del full_model
     gc.collect()
 
@@ -97,36 +100,68 @@ def create_minimal_feature_model(config, feature_index):
         in_chans=config.in_c
     )
 
-    # Step 4: Extract the required layers for the minimal model
-    layers = []
-    for name, module in base_model.named_children():
-        if name == 'blocks':
-            # We need to go inside 'blocks' and only add layers up to 'blocks.1'
-            sublayers = []
-            for i, subblock in enumerate(module.children()):
-                sublayers.append((str(i), subblock))
-                # If we've reached the target sub-block, stop
-                if f'blocks.{i}' == selected_feature_layer:
-                    break
-            # Create a partial blocks module
-            partial_blocks = nn.Sequential(OrderedDict(sublayers))
-            layers.append(('blocks', partial_blocks))
-            break
+    def extract_submodel(module, path_parts):
+        """
+        Recursively extract a submodel from `module` using `path_parts`.
+        `path_parts` is a list of strings where each part is either:
+        - a submodule name (e.g., 'layer1')
+        - a numeric index for sequential containers (e.g., '1').
+        """
+        if not path_parts:
+            return module
+
+        part = path_parts[0]
+        remaining = path_parts[1:]
+
+        if part.isdigit():
+            # Handle numeric indexing for sequential modules
+            idx = int(part)
+            if isinstance(module, (nn.Sequential, nn.ModuleList)):
+                truncated = OrderedDict()
+                for i, (n, m) in enumerate(module.named_children()):
+                    truncated[n] = m
+                    if i == idx:
+                        if remaining:
+                            truncated[n] = extract_submodel(m, remaining)
+                        break
+                return nn.Sequential(truncated)
+            else:
+                raise ValueError(f"Expected a sequential-like module at '{part}', got {type(module)}")
         else:
-            # Add layers until we reach the 'blocks' module
-            layers.append((name, module))
-            # If the selected feature layer were before 'blocks', 
-            # you'd break here (but in this case it's within 'blocks').
-    
+            # Handle named submodules
+            if not hasattr(module, part):
+                raise ValueError(f"Module '{part}' not found in {module}")
+
+            submod = getattr(module, part)
+            if remaining:
+                submod = extract_submodel(submod, remaining)
+
+            # Rebuild top-level module with truncated children
+            new_odict = OrderedDict()
+            found = False
+            for n, m in module.named_children():
+                new_odict[n] = m
+                if n == part:
+                    # Replace the last module with the truncated version
+                    new_odict[n] = submod
+                    found = True
+                    break
+            if not found:
+                return submod
+
+            # Return a container with all layers up to 'part'
+            if isinstance(module, nn.Sequential):
+                return nn.Sequential(new_odict)
+            else:
+                return nn.Sequential(new_odict)
+
+    # Parse the selected feature layer path and extract the minimal model
+    path_parts = selected_feature_layer.split('.')
+    minimal_model = extract_submodel(base_model, path_parts)
+
+    # Clean up base_model to save memory
     del base_model
     gc.collect()
-
-    # Build the minimal model using nn.Sequential
-    minimal_model = nn.Sequential(OrderedDict(layers))
-
-    # Cleanup unnecessary variables to save memory
-    del selected_feature_layer
-    gc.collect()  # Free up memory
 
     return minimal_model, selected_feature_channels
 
