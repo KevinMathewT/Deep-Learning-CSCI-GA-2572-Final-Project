@@ -29,7 +29,7 @@ def train_one_epoch(
     non_expert_val=True, 
     expert_val=True
 ):
-    global best_normal_loss, best_wall_loss
+    global best_normal_loss, best_wall_loss, best_expert_loss
 
     model.train()
     total_loss = 0
