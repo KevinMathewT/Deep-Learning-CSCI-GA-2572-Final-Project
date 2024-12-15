@@ -8,8 +8,8 @@ import torch.nn.functional as F
 class VICRegLoss(nn.Module):
     def __init__(
         self,
-        inv_coeff: float = 1.0,
-        var_coeff: float = 25.0,
+        inv_coeff: float = 25.0,
+        var_coeff: float = 15.0,
         cov_coeff: float = 1.0,
         gamma: float = 1.0,
     ):
