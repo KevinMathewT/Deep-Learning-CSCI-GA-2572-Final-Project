@@ -3305,7 +3305,8 @@ class ActionRegularizationJEPA2Dv3(BaseModel):
                 preds.append(pred_state)
 
             preds = torch.stack(preds, dim=1)  # (B,T,1,H',W')
-            return preds, None, enc_wall
+            preds = preds.view(B, T, -1)  # (B, T, H'*W')
+            return preds
 
     def compute_mse_loss(self, preds, enc_s):
         # preds, enc_s: (B,T,1,H',W')
