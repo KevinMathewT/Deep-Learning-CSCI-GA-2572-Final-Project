@@ -25,7 +25,7 @@ def train_one_epoch(
     probe_train_expert_ds, 
     probe_val_expert_ds, 
     k=1, 
-    l=4, 
+    l=1, 
     non_expert_val=True, 
     expert_val=True
 ):
