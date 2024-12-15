@@ -2785,7 +2785,7 @@ class Encoder2Dv1(nn.Module):
                     out_channels,
                     out_channels,
                     kernel_size=3,
-                    stride=2,
+                    stride=1,
                     padding=0 if i == 0 else 1,
                 )
             )  # Halve the spatial dimensions
