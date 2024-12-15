@@ -3128,9 +3128,9 @@ class WallEncoder2Dv3(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
-        self.wall_repr_dim = config.wall_repr_dim
+        self.wall_embed_dim = config.wall_embed_dim
         _input_size = 65
-        self.output_side = int(math.sqrt(self.wall_repr_dim))
+        self.output_side = int(math.sqrt(self.wall_embed_dim))
         self.num_conv_blocks = int(math.log2(_input_size / self.output_side))
         if 2 ** self.num_conv_blocks * self.output_side != 2 ** int(math.log2(_input_size)):
             raise ValueError("Cannot evenly reduce input_size to output_side for wall encoder.")
@@ -3230,7 +3230,7 @@ class ActionRegularizationJEPA2Dv3(BaseModel):
         super().__init__(config)
         self.config = config
         self.repr_dim = config.embed_dim
-        self.wall_repr_dim = config.wall_repr_dim
+        self.wall_embed_dim = config.wall_embed_dim
 
         self.agent_encoder = Encoder2Dv3(config)
         self.wall_encoder = WallEncoder2Dv3(config)

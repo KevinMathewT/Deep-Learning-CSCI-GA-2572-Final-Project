@@ -1,5 +1,5 @@
 embed_dim: 256
-wall_repr_dim: 256
+wall_embed_dim: 256
 action_dim: 2
 in_c: 2
 epochs: 20
