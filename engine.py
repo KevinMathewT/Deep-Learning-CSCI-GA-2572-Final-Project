@@ -13,10 +13,24 @@ best_expert_loss = float("inf")
 
 
 def train_one_epoch(
-    epoch, model, tdl, vdl, acc, step, config, probe_train_ds, probe_val_ds, probe_train_expert_ds, probe_val_expert_ds, k=1, l=4
+    epoch, 
+    model, 
+    tdl, 
+    vdl, 
+    acc, 
+    step, 
+    config, 
+    probe_train_ds, 
+    probe_val_ds, 
+    probe_train_expert_ds, 
+    probe_val_expert_ds, 
+    k=1, 
+    l=1, 
+    non_expert_val=False, 
+    expert_val=True
 ):
     global best_normal_loss, best_wall_loss
-    
+
     model.train()
     total_loss = 0
 
@@ -77,8 +91,16 @@ def train_one_epoch(
         if (i + 1) % (len(tdl) // l) == 0:
             acc.print(f"------ Running Probing Evaluator for epoch {epoch + 1} ------")
             # Evaluate the model using the probing evaluator
-            avg_losses = evaluate_model(acc.device, model, probe_train_ds, probe_val_ds)
-            avg_expert_losses = evaluate_model(acc.device, model, probe_train_expert_ds, probe_val_expert_ds)
+            
+            if non_expert_val:
+                avg_losses = evaluate_model(acc.device, model, probe_train_ds, probe_val_ds)
+            else:
+                avg_losses = {"normal": 0, "wall": 0}
+
+            if expert_val:
+                avg_expert_losses = evaluate_model(acc.device, model, probe_train_expert_ds, probe_val_expert_ds)
+            else:
+                avg_expert_losses = {"expert": 0}
 
             # Check and save the best model for "normal"
             if avg_losses["normal"] < best_normal_loss:
