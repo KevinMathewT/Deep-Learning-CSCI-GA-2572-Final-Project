@@ -2583,8 +2583,6 @@ class ActionRegularizationJEPA2Dv0(BaseModel):
         mu_variance = self.config.vicreg_loss.mu_variance
         nu_covariance = self.config.vicreg_loss.nu_covariance
 
-        print(f"using lambda_invariance: {lambda_invariance}, mu_variance: {mu_variance}, nu_covariance: {nu_covariance}")
-
         preds, enc_s = preds[:, 1:], enc_s[:, 1:]  # Drop the first timestep
 
         # Flatten spatial and temporal dimensions for batch processing
