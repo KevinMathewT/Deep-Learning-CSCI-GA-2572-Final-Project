@@ -1430,7 +1430,7 @@ class Encoder2D(nn.Module):
 
         # Final convolution to reduce to single-channel output
         layers.append(
-            nn.Conv2d(in_channels, 1, kernel_size=1)
+            nn.Conv2d(in_channels, config.out_c, kernel_size=1)
         )  # Single-channel embedding
 
         self.conv = nn.Sequential(*layers)
