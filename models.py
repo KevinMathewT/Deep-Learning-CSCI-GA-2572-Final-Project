@@ -1554,50 +1554,50 @@ class ActionRegularizationJEPA2D(BaseModel):
         if teacher_forcing:
             states = states.view(B * T, C, H, W)  # Reshape to (B*T, C, H, W)
 
-            enc_states = self.enc(states)  # (B*T, 1, H', W')
-            _, _, H_out, W_out = enc_states.shape
-            enc_states = enc_states.view(B, T, 1, H_out, W_out)  # (B, T, 1, H', W')
-            preds = torch.zeros_like(enc_states)  # preds: (B, T, 1, H', W')
+            enc_states = self.enc(states)  # (B*T, C_out, H', W')
+            _, C_out, H_out, W_out = enc_states.shape
+            enc_states = enc_states.view(B, T, C_out, H_out, W_out)  # (B, T, C_out, H', W')
+            preds = torch.zeros_like(enc_states)  # preds: (B, T, C_out, H', W')
             preds[:, 0, :, :, :] = enc_states[
                 :, 0, :, :, :
             ]  # Initialize first timestep
 
             # Prepare inputs for the predictor
-            states_embed = enc_states[:, :-1, :, :, :]  # (B, T-1, 1, H', W')
+            states_embed = enc_states[:, :-1, :, :, :]  # (B, T-1, C_out, H', W')
             states_embed = states_embed.contiguous().view(
-                -1, 1, H_out, W_out
-            )  # (B*(T-1), 1, H', W')
+                -1, C_out, H_out, W_out
+            )  # (B*(T-1), C_out, H', W')
             actions = actions.view(-1, self.config.action_dim)  # (B*(T-1), action_dim)
 
-            pred_states = self.pred(states_embed, actions)  # (B*(T-1), 1, H', W')
+            pred_states = self.pred(states_embed, actions)  # (B*(T-1), C_out, H', W')
             pred_states = pred_states.view(
-                B, T - 1, 1, H_out, W_out
-            )  # (B, T-1, 1, H', W')
+                B, T - 1, C_out, H_out, W_out
+            )  # (B, T-1, C_out, H', W')
             preds[:, 1:, :, :, :] = pred_states  # Assign predictions to preds
 
             return (
                 preds,
                 enc_states,
-            )  # preds: (B, T, 1, H', W'), enc_states: (B, T, 1, H', W')
+            )  # preds: (B, T, C_out, H', W'), enc_states: (B, T, C_out, H', W')
 
         else:
             states_0 = states[:, 0, :, :, :]  # (B, C, H, W)
-            enc_state = self.enc(states_0)  # (B, 1, H', W')
+            enc_state = self.enc(states_0)  # (B, C_out, H', W')
             preds = [enc_state]  # List to store predictions
 
             for t in range(1, T):
                 action_t_minus1 = actions[:, t - 1, :]  # (B, action_dim)
                 state_embed_t_minus1 = preds[
                     -1
-                ]  # Use the last predicted embedding (B, 1, H', W')
+                ]  # Use the last predicted embedding (B, C_out, H', W')
                 pred_state = self.pred(
                     state_embed_t_minus1, action_t_minus1
-                )  # (B, 1, H', W')
+                )  # (B, C_out, H', W')
                 preds.append(pred_state)
 
             # Stack predictions and true encodings along the time dimension
-            preds = torch.stack(preds, dim=1)  # (B, T, 1, H', W')
-            preds = preds.view(B, T, -1)  # (B, T, H'*W')
+            preds = torch.stack(preds, dim=1)  # (B, T, C_out, H', W')
+            preds = preds.view(B, T, -1)  # (B, T, C_out*H'*W')
             return preds
 
     def compute_mse_loss(self, preds, enc_s):
