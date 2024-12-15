@@ -8,6 +8,7 @@ import timm
 
 from optimizer import get_optimizer, get_scheduler
 from configs import JEPAConfig
+from utils import get_subsequences
 
 from typing import Dict
 
@@ -3073,6 +3074,368 @@ class ActionRegularizationJEPA2Dv1(BaseModel):
         return output
     
 
+class Encoder2Dv3(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+        self.repr_dim = config.embed_dim
+
+        _input_size = 65
+        self.output_side = int(math.sqrt(self.repr_dim))
+        self.num_conv_blocks = int(math.log2(_input_size / self.output_side))
+        if 2 ** self.num_conv_blocks * self.output_side != 2 ** int(math.log2(_input_size)):
+            raise ValueError("Cannot evenly reduce input_size to output_side using stride-2 convolutions.")
+        
+        layers = []
+        in_channels = 1  # Only the agent channel
+        out_channels = 16
+        for i in range(self.num_conv_blocks):
+            layers.append(
+                nn.Conv2d(
+                    in_channels,
+                    out_channels,
+                    kernel_size=3,
+                    stride=2,
+                    padding=0 if i == 0 else 1,
+                )
+            )
+            layers.append(nn.ReLU())
+            layers.append(
+                nn.Conv2d(
+                    out_channels,
+                    out_channels,
+                    kernel_size=3,
+                    stride=1,
+                    padding=1,
+                )
+            )
+            layers.append(nn.ReLU())
+            in_channels = out_channels
+            out_channels = min(out_channels * 2, 256)
+
+        # Final convolution to single-channel
+        layers.append(nn.Conv2d(in_channels, 1, kernel_size=1))
+
+        self.conv = nn.Sequential(*layers)
+
+    def forward(self, x):
+        # x: (B*T, 1, 65, 65)
+        x = self.conv(x)  # (B*T, 1, output_side, output_side)
+        return x
+
+
+class WallEncoder2Dv3(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+        self.wall_repr_dim = config.wall_repr_dim
+        _input_size = 65
+        self.output_side = int(math.sqrt(self.wall_repr_dim))
+        self.num_conv_blocks = int(math.log2(_input_size / self.output_side))
+        if 2 ** self.num_conv_blocks * self.output_side != 2 ** int(math.log2(_input_size)):
+            raise ValueError("Cannot evenly reduce input_size to output_side for wall encoder.")
+
+        layers = []
+        in_channels = 1
+        out_channels = 16
+        for i in range(self.num_conv_blocks):
+            layers.append(
+                nn.Conv2d(
+                    in_channels,
+                    out_channels,
+                    kernel_size=3,
+                    stride=2,
+                    padding=0 if i == 0 else 1
+                )
+            )
+            layers.append(nn.ReLU())
+            layers.append(
+                nn.Conv2d(
+                    out_channels,
+                    out_channels,
+                    kernel_size=3,
+                    stride=1,
+                    padding=1
+                )
+            )
+            layers.append(nn.ReLU())
+            in_channels = out_channels
+            out_channels = min(out_channels * 2, 256)
+
+        layers.append(nn.Conv2d(in_channels, 1, kernel_size=1))
+        self.conv = nn.Sequential(*layers)
+
+    def forward(self, x):
+        # x: (B*T, 1, 65, 65)
+        x = self.conv(x)  # (B*T, 1, output_side, output_side)
+        return x
+
+
+class Predictor2Dv3(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+        self.repr_dim = config.embed_dim
+        self.output_side = int(math.sqrt(self.repr_dim))
+
+        # Project action to 2D embedding
+        self.action_proj = nn.Linear(self.config.action_dim, self.output_side ** 2)
+
+        # The input to the conv will be (state_embed + wall_embed + action_embed) = 3 channels
+        # state: (B,1,H,W)
+        # wall: (B,1,H,W)
+        # action: (B,1,H,W)
+        # total: (B,3,H,W)
+        self.conv = nn.Sequential(
+            nn.Conv2d(3, 32, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(32, 1, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+        )
+
+    def forward(self, s_embed, a, wall_embed):
+        # s_embed: (B, 1, H, W)
+        # a: (B, action_dim)
+        # wall_embed: (B, 1, H, W)
+        B, _, H, W = s_embed.shape
+
+        a_proj = self.action_proj(a).view(B, 1, H, W)  # (B,1,H,W)
+        x = torch.cat([s_embed, wall_embed, a_proj], dim=1)  # (B,3,H,W)
+        x = self.conv(x)  # (B,1,H,W)
+        return x
+
+
+class ActionRegularizer2Dv3(nn.Module):
+    def __init__(self, embed_dim, action_dim):
+        super().__init__()
+        self.output_side = int(math.sqrt(embed_dim))
+        self.action_reg_net = nn.Sequential(
+            nn.Conv2d(1, 16, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(16, 1, kernel_size=3, padding=1),
+            nn.Flatten(),
+            nn.Linear(self.output_side * self.output_side, action_dim),
+        )
+
+    def forward(self, states_embed, pred_states):
+        # states_embed: (B*(T-1),1,H,W)
+        # pred_states: (B*(T-1),1,H,W)
+        embedding_diff = pred_states - states_embed  # (B*(T-1),1,H,W)
+        predicted_actions = self.action_reg_net(embedding_diff)  # (B*(T-1), action_dim)
+        return predicted_actions
+
+
+class ActionRegularizationJEPA2Dv3(BaseModel):
+    def __init__(self, config):
+        super().__init__(config)
+        self.config = config
+        self.repr_dim = config.embed_dim
+        self.wall_repr_dim = config.wall_repr_dim
+
+        self.agent_encoder = Encoder2Dv3(config)
+        self.wall_encoder = WallEncoder2Dv3(config)
+        self.pred = Predictor2Dv3(config)
+        self.action_reg_net = ActionRegularizer2Dv3(config.embed_dim, config.action_dim)
+
+        self.optimizer = torch.optim.Adam(self.parameters(), lr=config.learning_rate)
+        self.scheduler = OneCycleLR(
+            self.optimizer,
+            max_lr=config.learning_rate,
+            steps_per_epoch=config.steps_per_epoch,
+            epochs=config.epochs,
+            pct_start=0.05,
+            anneal_strategy="cos",
+        )
+
+    def forward(self, states, actions, teacher_forcing=True):
+        # states: (B,T,2,H=65,W=65)
+        # actions: (B,T-1,action_dim)
+        B, T, C, H, W = states.shape
+        trajectory = states[:, :, 0:1, :, :]  # agent channel
+        wall = states[:, :, 1:2, :, :]        # wall channel
+
+        _, _, _, H_, W_ = trajectory.shape
+
+        if teacher_forcing:
+            # Encode all agent states
+            traj_flat = trajectory.view(B * T, 1, H_, W_)
+            enc_states = self.agent_encoder(traj_flat)  # (B*T,1,H',W')
+            _, _, H_out, W_out = enc_states.shape
+            enc_states = enc_states.view(B, T, 1, H_out, W_out)
+
+            # Encode only initial wall state
+            wall_initial = wall[:, :1].contiguous().view(B, 1, H_, W_)
+            enc_wall = self.wall_encoder(wall_initial)  # (B*1,1,H',W')
+            enc_wall = enc_wall.view(B, 1, 1, H_out, W_out)
+
+            preds = torch.zeros_like(enc_states)
+            preds[:, 0, :, :, :] = enc_states[:, 0, :, :, :]
+
+            # Prepare predictor input
+            states_embed = enc_states[:, :-1].contiguous().view(-1, 1, H_out, W_out)
+            actions_flat = actions.view(-1, self.config.action_dim)
+
+            # Repeat wall encoding for each timestep except last
+            enc_wall_rep = enc_wall.repeat(1, T - 1, 1, 1, 1).view(B * (T - 1), 1, H_out, W_out)
+
+            # Predict next states
+            pred_states = self.pred(states_embed, actions_flat, enc_wall_rep)
+            pred_states = pred_states.view(B, T - 1, 1, H_out, W_out)
+            preds[:, 1:] = pred_states
+
+            return preds, enc_states, enc_wall
+
+        else:
+            # No teacher forcing: only encode initial agent and wall state
+            traj_initial = trajectory[:, 0:1].contiguous().view(B, 1, H_, W_)
+            enc_state_init = self.agent_encoder(traj_initial)  # (B,1,H',W')
+            _, _, H_out, W_out = enc_state_init.shape
+            enc_state_init = enc_state_init.view(B, 1, 1, H_out, W_out)
+
+            wall_initial = wall[:, :1].contiguous().view(B, 1, H_, W_)
+            enc_wall = self.wall_encoder(wall_initial)  # (B,1,H',W')
+            enc_wall = enc_wall.view(B, 1, 1, H_out, W_out)
+
+            preds = [enc_state_init[:,0]]  # list of (B,1,H',W')
+            for t in range(1, T):
+                action_t = actions[:, t - 1, :]
+                prev_state = preds[-1]  # (B,1,H',W')
+                # wall stays constant (enc_wall[:,0])
+                pred_state = self.pred(prev_state, action_t, enc_wall[:,0])  
+                preds.append(pred_state)
+
+            preds = torch.stack(preds, dim=1)  # (B,T,1,H',W')
+            return preds, None, enc_wall
+
+    def compute_mse_loss(self, preds, enc_s):
+        # preds, enc_s: (B,T,1,H',W')
+        loss = F.mse_loss(preds[:, 1:], enc_s[:, 1:])
+        return loss
+
+    def compute_regularization_loss(self, states_embed, pred_states, actions):
+        # states_embed, pred_states: (B*(T-1),1,H',W')
+        # actions: (B*(T-1),action_dim)
+        predicted_actions = self.action_reg_net(states_embed, pred_states)
+        reg_loss = F.mse_loss(predicted_actions, actions)
+        return reg_loss
+
+    def compute_vicreg_loss(self, preds, enc_s, gamma=1.0, epsilon=1e-4):
+        lambda_invariance = self.config.vicreg_loss.lambda_invariance
+        mu_variance = self.config.vicreg_loss.mu_variance
+        nu_covariance = self.config.vicreg_loss.nu_covariance
+
+        preds, enc_s = preds[:, 1:], enc_s[:, 1:]  # Drop the first timestep
+
+        B, T, _, H, W = preds.shape
+        embed_dim = H * W
+        Z = preds.reshape(B * T, embed_dim)
+        Z_prime = enc_s.reshape(B * T, embed_dim)
+
+        # Invariance
+        invariance_loss = torch.mean(torch.sum((Z - Z_prime) ** 2, dim=1))
+        # Variance
+        std_Z = torch.sqrt(Z.var(dim=0, unbiased=False) + epsilon)
+        std_Z_prime = torch.sqrt(Z_prime.var(dim=0, unbiased=False) + epsilon)
+        variance_loss = torch.mean(F.relu(gamma - std_Z)) + torch.mean(F.relu(gamma - std_Z_prime))
+
+        # Covariance
+        Z_centered = Z - Z.mean(dim=0, keepdim=True)
+        Z_prime_centered = Z_prime - Z_prime.mean(dim=0, keepdim=True)
+        cov_Z = (Z_centered.T @ Z_centered) / (B * T - 1)
+        cov_Z_prime = (Z_prime_centered.T @ Z_prime_centered) / (B * T - 1)
+
+        cov_loss_Z = torch.sum(cov_Z**2) - torch.sum(torch.diag(cov_Z) ** 2)
+        cov_loss_Z_prime = torch.sum(cov_Z_prime**2) - torch.sum(torch.diag(cov_Z_prime) ** 2)
+        covariance_loss = cov_loss_Z + cov_loss_Z_prime
+
+        vicreg_loss = (lambda_invariance * invariance_loss
+                       + mu_variance * variance_loss
+                       + nu_covariance * covariance_loss)
+
+        return vicreg_loss, invariance_loss, variance_loss, covariance_loss
+
+    def training_step(self, batch, device):
+        states, actions = batch.states.to(device, non_blocking=True), batch.actions.to(device, non_blocking=True)
+        preds, enc_s, enc_wall = self.forward(states, actions, teacher_forcing=True)
+
+        B, T, _, H, W = enc_s.shape
+        states_embed = enc_s[:, :-1].reshape(-1, 1, H, W)
+        pred_states = preds[:, 1:].reshape(-1, 1, H, W)
+        actions_flat = actions.reshape(-1, self.config.action_dim)
+
+        action_reg_loss = self.compute_regularization_loss(states_embed, pred_states, actions_flat)
+
+        vic_reg_loss, invariance_loss, variance_loss, covariance_loss = self.compute_vicreg_loss(preds, enc_s)
+
+        total_loss = vic_reg_loss + self.config.lambda_reg * action_reg_loss
+
+        self.optimizer.zero_grad()
+        total_loss.backward()
+
+        grad_norm = 0.0
+        for p in self.parameters():
+            if p.grad is not None:
+                param_norm = p.grad.data.norm(2)
+                grad_norm += param_norm.item() ** 2
+        grad_norm = grad_norm**0.5
+
+        self.optimizer.step()
+        self.scheduler.step()
+
+        learning_rate = self.optimizer.param_groups[0]["lr"]
+        action_weight_abs = 0.0
+        if hasattr(self.pred, 'action_proj'):
+            action_weight_abs = self.pred.action_proj.weight.abs().mean().item()
+
+        output = {
+            "loss": total_loss.item(),
+            "grad_norm": grad_norm,
+            "learning_rate": learning_rate,
+            "action_weight_abs": action_weight_abs,
+            "action_reg_loss": action_reg_loss.item(),
+            "invariance_loss": invariance_loss,
+            "variance_loss": variance_loss,
+            "covariance_loss": covariance_loss,
+        }
+
+        output["non_logs"] = {
+            "states": states.detach(),
+            "actions": actions.detach(),
+            "enc_embeddings": enc_s.detach(),
+            "pred_embeddings": preds.detach(),
+            "wall_embeddings": enc_wall.detach(),
+        }
+
+        return output
+
+    def validation_step(self, batch):
+        states, actions = batch.states, batch.actions
+        preds, enc_s, enc_wall = self.forward(states, actions, teacher_forcing=True)
+
+        loss = self.compute_mse_loss(preds, enc_s)
+        learning_rate = self.optimizer.param_groups[0]["lr"]
+        action_weight_abs = 0.0
+        if hasattr(self.pred, 'action_proj'):
+            action_weight_abs = self.pred.action_proj.weight.abs().mean().item()
+
+        output = {
+            "loss": loss.item(),
+            "learning_rate": learning_rate,
+            "action_weight_abs": action_weight_abs,
+        }
+
+        output["non_logs"] = {
+            "states": states.detach(),
+            "actions": actions.detach(),
+            "enc_embeddings": enc_s.detach(),
+            "pred_embeddings": preds.detach(),
+            "wall_embeddings": enc_wall.detach(),
+        }
+
+        return output
+
+
+
 # Model mapping and get_model function
 MODEL_MAP: Dict[str, BaseModel] = {
     "JEPA": JEPA,
@@ -3085,6 +3448,7 @@ MODEL_MAP: Dict[str, BaseModel] = {
     "JEPA2Dv2": JEPA2Dv2,
     "ActionRegularizationJEPA2Dv0": ActionRegularizationJEPA2Dv0,
     "ActionRegularizationJEPA2Dv1": ActionRegularizationJEPA2Dv1,
+    "ActionRegularizationJEPA2Dv3": ActionRegularizationJEPA2Dv3,
     # Add more models here as needed
 }
 

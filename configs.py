@@ -130,7 +130,9 @@ class VicRegConfig:
 @dataclass
 class JEPAConfig(ConfigBase):
     embed_dim: int = 256
+    wall_embed_dim: int = 128
     action_dim: int = 2
+    action_hidden_dim: int = 32
     in_c: int = 2
     out_c: int = 64
     epochs: int = 20
