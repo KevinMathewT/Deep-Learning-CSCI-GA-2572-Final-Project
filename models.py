@@ -1405,7 +1405,7 @@ class Encoder2D(nn.Module):
 
         layers = []
         in_channels = 2  # Input has 2 channels (agent and wall)
-        out_channels = 16  # Start with 32 output channels
+        out_channels = 16  # Start with 16 output channels
         for i in range(self.num_conv_blocks):
             layers.append(
                 nn.Conv2d(
@@ -1428,17 +1428,17 @@ class Encoder2D(nn.Module):
             in_channels = out_channels
             out_channels = min(out_channels * 2, 256)  # Cap channels at 256
 
-        # Final convolution to reduce to single-channel output
+        # Final convolution to reduce to config.out_c channels
         layers.append(
             nn.Conv2d(in_channels, config.out_c, kernel_size=1)
-        )  # Single-channel embedding
+        )  # Reduce to config.out_c channels
 
         self.conv = nn.Sequential(*layers)
 
     def forward(self, x):
         # Input: (B, 2, 65, 65)
-        x = self.conv(x)  # Dynamically reduce to (B, 1, output_side, output_side)
-        return x  # Output shape: (B, 1, output_side, output_side)
+        x = self.conv(x)  # Dynamically reduce to (B, config.out_c, output_side, output_side)
+        return x  # Output shape: (B, config.out_c, output_side, output_side)
 
 
 class Predictor2D(nn.Module):
@@ -1506,18 +1506,18 @@ class ActionRegularizer2D(nn.Module):
         self.action_reg_net = nn.Sequential(
             nn.Conv2d(config.out_c, 16, kernel_size=3, padding=1),  # 2D conv layer
             nn.ReLU(),
-            nn.Conv2d(16, 1, kernel_size=3, padding=1),  # Output single channel
+            nn.Conv2d(16, config.out_c, kernel_size=3, padding=1),  # Output C' channels
             nn.Flatten(),  # Flatten to prepare for linear mapping
             nn.Linear(
-                self.output_side * self.output_side, action_dim
+                self.output_side * self.output_side * config.out_c, action_dim
             ),  # Map to action_dim
         )
 
     def forward(self, states_embed, pred_states):
         """
         Args:
-            states_embed: Tensor of shape (B*(T-1), 1, output_side, output_side) - previous state embeddings
-            pred_states: Tensor of shape (B*(T-1), 1, output_side, output_side) - predicted state embeddings
+            states_embed: Tensor of shape (B*(T-1), C', output_side, output_side) - previous state embeddings
+            pred_states: Tensor of shape (B*(T-1), C', output_side, output_side) - predicted state embeddings
 
         Returns:
             predicted_actions: Tensor of shape (B*(T-1), action_dim) - predicted actions
@@ -1525,7 +1525,7 @@ class ActionRegularizer2D(nn.Module):
         # Calculate embedding differences
         embedding_diff = (
             pred_states - states_embed
-        )  # (B*(T-1), 1, output_side, output_side)
+        )  # (B*(T-1), C', output_side, output_side)
 
         # Predict actions from embedding differences
         predicted_actions = self.action_reg_net(embedding_diff)  # (B*(T-1), action_dim)
@@ -1601,7 +1601,7 @@ class ActionRegularizationJEPA2D(BaseModel):
             return preds
 
     def compute_mse_loss(self, preds, enc_s):
-        # preds, enc_s: (B, T, 1, H', W')
+        # preds, enc_s: (B, T, C_out, H', W')
         loss = F.mse_loss(
             preds[:, 1:], enc_s[:, 1:]
         )  # Compute MSE loss for timesteps 1 to T-1
@@ -1611,7 +1611,7 @@ class ActionRegularizationJEPA2D(BaseModel):
         """
         Computes the regularization loss based on the embedding difference and actions.
         """
-        # states_embed and pred_states: (B*(T-1), 1, H', W')
+        # states_embed and pred_states: (B*(T-1), C_out, H', W')
         # actions: (B*(T-1), action_dim)
         # Predict actions from embedding differences
         predicted_actions = self.action_reg_net(
@@ -1627,8 +1627,8 @@ class ActionRegularizationJEPA2D(BaseModel):
         Compute VICReg loss with invariance, variance, and covariance terms.
 
         Args:
-            preds: Predicted embeddings from the predictor. Shape (B, T, 1, H', W').
-            enc_s: Target embeddings from the encoder. Shape (B, T, 1, H', W').
+            preds: Predicted embeddings from the predictor. Shape (B, T, C_out, H', W').
+            enc_s: Target embeddings from the encoder. Shape (B, T, C_out, H', W').
             gamma: Target standard deviation for variance term.
             epsilon: Small value to avoid numerical instability.
 
@@ -1693,16 +1693,16 @@ class ActionRegularizationJEPA2D(BaseModel):
         states, actions = batch.states.to(device, non_blocking=True), batch.actions.to(
             device, non_blocking=True
         )
-        preds, enc_s = self.forward(states, actions)  # preds, enc_s: (B, T, 1, H, W)
+        preds, enc_s = self.forward(states, actions)  # preds, enc_s: (B, T, C_out, H, W)
 
         # Compute regularization loss
-        B, T, _, H, W = enc_s.shape  # (B, T, 1, H, W)
+        B, T, C_out, H, W = enc_s.shape  # (B, T, C_out, H, W)
         states_embed = enc_s[:, :-1, :, :, :].reshape(
-            -1, 1, H, W
-        )  # Input to predictor: (B*(T-1), 1, H, W)
+            -1, C_out, H, W
+        )  # Input to predictor: (B*(T-1), C_out, H, W)
         pred_states = preds[:, 1:, :, :, :].reshape(
-            -1, 1, H, W
-        )  # Output of predictor: (B*(T-1), 1, H, W)
+            -1, C_out, H, W
+        )  # Output of predictor: (B*(T-1), C_out, H, W)
         actions = actions.reshape(
             -1, self.config.action_dim
         )  # Actions: (B*(T-1), action_dim)
@@ -1773,10 +1773,10 @@ class ActionRegularizationJEPA2D(BaseModel):
 
     def validation_step(self, batch):
         states, actions = batch.states, batch.actions
-        preds, enc_s = self.forward(states, actions)  # preds, enc_s: (B, T, 1, H, W)
+        preds, enc_s = self.forward(states, actions)  # preds, enc_s: (B, T, C_out, H, W)
 
         # Compute MSE Loss
-        loss = self.compute_mse_loss(preds, enc_s)  # preds, enc_s: (B, T, 1, H, W)
+        loss = self.compute_mse_loss(preds, enc_s)  # preds, enc_s: (B, T, C_out, H, W)
 
         # Learning rate
         learning_rate = self.optimizer.param_groups[0]["lr"]
