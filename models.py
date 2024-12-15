@@ -2786,9 +2786,9 @@ class Encoder2Dv1(nn.Module):
                     out_channels,
                     kernel_size=3,
                     stride=1,
-                    padding=0 if i == 0 else 1,
+                    padding=1,
                 )
-            )  # Halve the spatial dimensions
+            )
             layers.append(nn.ReLU())
             in_channels = out_channels
             out_channels = min(out_channels * 2, 256)  # Cap channels at 256
