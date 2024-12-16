@@ -3080,7 +3080,7 @@ current_max_timesteps = 0
 class ActionRegularizationJEPA2Dv2(BaseModel):
     def __init__(self, config):
         super().__init__(config)
-        self.enc = Encoder2Dv1(config)
+        self.enc = Encoder2Dv0(config)
         self.pred = Predictor2Dv0(config)
         self.action_reg_net = ActionRegularizer2Dv0(config.embed_dim, config.action_dim)  # Small network for action prediction from embedding differences
 
