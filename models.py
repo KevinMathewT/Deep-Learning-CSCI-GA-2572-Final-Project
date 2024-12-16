@@ -3818,7 +3818,7 @@ class FinalModel(nn.Module):
 
     def forward(self, first_state, actions):
         if actions.size(1) > 18:  # Replace `condition` with your logic
-            return self.areg_vicreg_model(first_state, actions, teacher_forcing=False)
+            return self.areg_vicreg_model(first_state, actions, teacher_forcing=False).transpose(0, 1)  # # BS, T, D --> T, BS, D
         else:
             first_state = first_state[:, 0]
             print(f"first_state: {first_state.shape}")
