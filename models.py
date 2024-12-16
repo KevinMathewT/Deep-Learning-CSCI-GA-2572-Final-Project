@@ -3738,6 +3738,7 @@ MODEL_MAP: Dict[str, BaseModel] = {
     "JEPA2Dv2": JEPA2Dv2,
     "ActionRegularizationJEPA2Dv0": ActionRegularizationJEPA2Dv0,
     "ActionRegularizationJEPA2Dv1": ActionRegularizationJEPA2Dv1,
+    "ActionRegularizationJEPA2Dv2": ActionRegularizationJEPA2Dv2,
     "ActionRegularizationJEPA2Dv3": ActionRegularizationJEPA2Dv3,
     # Add more models here as needed
 }
