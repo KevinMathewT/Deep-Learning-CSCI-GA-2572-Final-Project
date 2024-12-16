@@ -84,6 +84,7 @@ def load_model():
     config.steps_per_epoch = 999
     model = ActionRegularizationJEPA2Dv0(config)
     model.load_state_dict(torch.load('weights/best_expert_model_epoch_4_train_iter_76_normal_loss_21.21573_wall_loss_19.79489_expert_loss_85.14044.pt'))
+    model.cuda()
 
     return model
 
