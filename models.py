@@ -3797,10 +3797,14 @@ class CombinedModel(nn.Module):
 
 
 class FinalModel(nn.Module):
-    def __init__(self, areg_vicreg_model, just_vicreg_model):
+    def __init__(self, config):
         super(FinalModel, self).__init__()
-        self.areg_vicreg_model = areg_vicreg_model
-        self.just_vicreg_model = just_vicreg_model
+
+        self.areg_vicreg_model = ActionRegularizationJEPA2Dv0(config)
+        self.areg_vicreg_model.load_state_dict(torch.load('weights/best_expert_model_epoch_4_train_iter_76_normal_loss_21.21573_wall_loss_19.79489_expert_loss_85.14044.pt', map_location=device))
+
+        self.just_vicreg_model = CombinedModel()
+        self.just_vicreg_model.load_state_dict(torch.load("weights/combined_model.pth", map_location=device))
 
     def forward(self, first_state, actions):
         if actions.size(1) > 18:  # Replace `condition` with your logic
@@ -3852,6 +3856,6 @@ if __name__ == "__main__":
     just_vicreg_model.load_state_dict(torch.load("weights/combined_model.pth", map_location=device))
     just_vicreg_model.to(device)
 
-    final_model = FinalModel(areg_vicreg_model, just_vicreg_model)
+    final_model = FinalModel(config)
     final_model.to(device)
     acc.save(final_model.state_dict(), "weights/final_model.pth")
