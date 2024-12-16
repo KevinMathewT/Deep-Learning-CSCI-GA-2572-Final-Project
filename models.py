@@ -3327,7 +3327,7 @@ class ActionRegularizationJEPA2Dv2(BaseModel):
 
     def validation_step(self, batch):
         states, actions = batch.states, batch.actions
-        preds, enc_s = self.forward(states, actions)  # preds, enc_s: (B, T, 1, H, W)
+        preds, enc_s = self.forward(states, actions, teacher_forcing=False, return_embedding=True)  # preds, enc_s: (B, T, 1, H, W)
 
         # Compute MSE Loss
         loss = self.compute_mse_loss(preds, enc_s)  # preds, enc_s: (B, T, 1, H, W)
