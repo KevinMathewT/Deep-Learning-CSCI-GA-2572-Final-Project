@@ -3138,8 +3138,8 @@ class ActionRegularizationJEPA2Dv2(BaseModel):
             preds = torch.stack(preds, dim=1)  # (B, T, 1, H', W')
             preds = preds.view(B, T, -1)  # (B, T, H'*W')
             if return_embedding:
-                print(f"states: {states.shape}, preds: {preds.shape}, {B}, {T}, {C}, {H}, {W}")
-                states = states.view(B * T, C, H, W)
+                # print(f"states: {states.shape}, preds: {preds.shape}, {B}, {T}, {C}, {H}, {W}")
+                states = states.contiguous().view(B * T, C, H, W)
                 enc_states = self.enc(states)  # (B*T, 1, H', W')
                 _, _, H_out, W_out = enc_states.shape
                 enc_states = enc_states.view(B, T, 1, H_out, W_out)  # (B, T, 1, H', W')
