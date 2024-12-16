@@ -28,7 +28,7 @@ def seed_everything(seed=42):
     torch.cuda.manual_seed_all(seed)
 
 
-def calculate_max_timesteps(self, train_step):
+def calculate_max_timesteps(train_step):
         """
         Calculate max timesteps for input based on train_step using a cosine increasing function.
         The timesteps grow from 2 to 17 over the first 3 epochs.

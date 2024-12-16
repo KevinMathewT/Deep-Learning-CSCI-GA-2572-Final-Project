@@ -3239,6 +3239,8 @@ class ActionRegularizationJEPA2Dv2(BaseModel):
             print(f"Max timesteps changed from {current_max_timesteps} to {max_timesteps}")
             current_max_timesteps = max_timesteps
 
+        train_step += 1
+        
         states, actions = batch.states.to(device, non_blocking=True), batch.actions.to(
             device, non_blocking=True
         )
