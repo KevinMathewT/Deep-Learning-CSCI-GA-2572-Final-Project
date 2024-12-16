@@ -3820,6 +3820,7 @@ class FinalModel(nn.Module):
         if actions.size(1) > 18:  # Replace `condition` with your logic
             return self.areg_vicreg_model(first_state, actions, teacher_forcing=False)
         else:
+            first_state = first_state[:, 0]
             return self.just_vicreg_model(first_state, actions)
         
 
