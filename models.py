@@ -3821,6 +3821,8 @@ class FinalModel(nn.Module):
             return self.areg_vicreg_model(first_state, actions, teacher_forcing=False)
         else:
             first_state = first_state[:, 0]
+            print(f"first_state: {first_state.shape}")
+            print(f"output: {self.just_vicreg_model(first_state, actions).shape}")
             return self.just_vicreg_model(first_state, actions)
         
 
