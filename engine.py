@@ -29,6 +29,7 @@ def train_one_epoch(
     non_expert_val=True, 
     expert_val=True
 ):
+    avg_losses = evaluate_model(acc.device, model, probe_train_ds, probe_val_ds)
     global best_normal_loss, best_wall_loss, best_expert_loss
 
     model.train()
