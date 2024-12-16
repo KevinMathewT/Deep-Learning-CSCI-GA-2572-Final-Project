@@ -74,16 +74,14 @@ def load_expert_data(device):
     return probe_train_expert_ds, probe_val_expert_ds
 
 
-def load_model():
-    from configs import JEPAConfig
-    from models import JEPA
-    
+def load_model():    
     """Load or initialize the JEPA model."""
-    # Parse config file
-    config_path = "config/jepa_config.yaml"  # Update if the path differs
-    config = JEPAConfig.parse_from_file(config_path)
-    # Initialize JEPA model
-    model = JEPA(config)
+    
+    from models import ActionRegularizationJEPA2Dv0
+
+    model = ActionRegularizationJEPA2Dv0()
+    model.load_state_dict(torch.load('../weights/best_expert_model_epoch_4_train_iter_76_normal_loss_21.21573_wall_loss_19.79489_expert_loss_85.14044.pt'))
+
     return model
 
 
