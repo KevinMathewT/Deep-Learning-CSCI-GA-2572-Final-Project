@@ -80,13 +80,13 @@ def load_model():
     from models import ActionRegularizationJEPA2Dv0, FinalModel
     from configs import JEPAConfig
 
-    # config = JEPAConfig.parse_from_file("config/areg_jepa_2d_config_v0.yaml")
-    # config.steps_per_epoch = 999
+    config = JEPAConfig.parse_from_file("config/areg_jepa_2d_config_v0.yaml")
+    config.steps_per_epoch = 999
     # model = ActionRegularizationJEPA2Dv0(config)
     # model.load_state_dict(torch.load('weights/best_expert_model_epoch_4_train_iter_76_normal_loss_21.21573_wall_loss_19.79489_expert_loss_85.14044.pt'))
     # model.cuda()
 
-    model = FinalModel()
+    model = FinalModel(config)
     model.load_state_dict(torch.load('weights/final_model.pt'))
     model.cuda()
 
