@@ -38,7 +38,6 @@ default_config = ProbingConfig()
 
 
 def location_losses(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-    print(f"pred shape: {pred.shape}, target shape: {target.shape}")
     assert pred.shape == target.shape
     mse = (pred - target).pow(2).mean(dim=0)
     return mse
