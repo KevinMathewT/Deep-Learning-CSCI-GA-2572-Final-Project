@@ -3136,7 +3136,6 @@ class ActionRegularizationJEPA2Dv2(BaseModel):
 
             # Stack predictions and true encodings along the time dimension
             preds = torch.stack(preds, dim=1)  # (B, T, 1, H', W')
-            preds = preds.view(B, T, -1)  # (B, T, H'*W')
             if return_embedding:
                 # print(f"states: {states.shape}, preds: {preds.shape}, {B}, {T}, {C}, {H}, {W}")
                 states = states.contiguous().view(B * T, C, H, W)
@@ -3144,6 +3143,7 @@ class ActionRegularizationJEPA2Dv2(BaseModel):
                 _, _, H_out, W_out = enc_states.shape
                 enc_states = enc_states.view(B, T, 1, H_out, W_out)  # (B, T, 1, H', W')
                 return preds, enc_states
+            preds = preds.view(B, T, -1)  # (B, T, H'*W')
             return preds
 
     def compute_mse_loss(self, preds, enc_s):
