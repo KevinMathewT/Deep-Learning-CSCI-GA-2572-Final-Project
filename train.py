@@ -32,7 +32,7 @@ def setup(config):
     print("Loading dataset into memory...")
     full_dataset = WallDataset(data_path, probing=False) # , device=device)
     print("Dataset loaded.")
-    train_size = int(0.8 * len(full_dataset))
+    train_size = int(0.99 * len(full_dataset))
     val_size = len(full_dataset) - train_size
     train_dataset, val_dataset = torch.utils.data.random_split(full_dataset, [train_size, val_size])
 
