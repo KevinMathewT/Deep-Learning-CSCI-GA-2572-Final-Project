@@ -3729,7 +3729,7 @@ class ActionRegularizationJEPA2Dv3(BaseModel):
         return output
 
 
-class Encoder(nn.Module):
+class Encoder3(nn.Module):
     def __init__(self):
         super().__init__()
         self.convnext = nn.Sequential(
@@ -3750,7 +3750,7 @@ class Encoder(nn.Module):
         return features
     
 
-class Predictor(nn.Module):
+class Predictor3(nn.Module):
     def __init__(self, input_dim=66, output_dim=64):
         super().__init__()
         self.predictor = nn.Sequential(
@@ -3783,8 +3783,8 @@ class Predictor(nn.Module):
 class CombinedModel(nn.Module):
     def __init__(self):
         super().__init__()
-        self.encoder = Encoder()
-        self.predictor = Predictor()
+        self.encoder = Encoder3()
+        self.predictor = Predictor3()
         self.repr_dim = 64 * 17 * 17
 
     def forward(self, first_state, actions):
@@ -3805,6 +3805,16 @@ class FinalModel(nn.Module):
 
         self.just_vicreg_model = CombinedModel()
         # self.just_vicreg_model.load_state_dict(torch.load("weights/combined_model.pth", map_location=device))
+
+        self.repr_dim = None
+
+    def set_repr_dim(self, ds):
+        batch = next(ds)
+
+        if batch.actions.size(1) > 18:
+            self.repr_dim = self.areg_vicreg_model.repr_dim
+        else:
+            self.repr_dim = self.just_vicreg_model.repr_dim
 
     def forward(self, first_state, actions):
         if actions.size(1) > 18:  # Replace `condition` with your logic
