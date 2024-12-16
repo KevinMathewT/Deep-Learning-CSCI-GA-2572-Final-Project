@@ -3809,7 +3809,7 @@ class FinalModel(nn.Module):
         self.repr_dim = None
 
     def set_repr_dim(self, ds):
-        batch = next(ds)
+        batch = next(iter(ds))
 
         if batch.actions.size(1) > 18:
             self.repr_dim = self.areg_vicreg_model.repr_dim
