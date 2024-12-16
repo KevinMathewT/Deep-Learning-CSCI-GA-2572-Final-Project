@@ -216,6 +216,7 @@ class ProbingEvaluator:
             init_states = states[:, 0:1]  # BS, 1 C, H, W
             pred_encs = model(states=init_states, actions=actions, teacher_forcing=False)
             # # BS, T, D --> T, BS, D
+            print("pred_encs shape: ", pred_encs.size())
             pred_encs = pred_encs.transpose(0, 1)
 
             # Make sure pred_encs has shape (T, BS, D) at this point
