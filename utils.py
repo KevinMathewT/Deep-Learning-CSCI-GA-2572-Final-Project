@@ -39,7 +39,7 @@ def calculate_max_timesteps(train_step):
     Returns:
         max_timesteps: Number of timesteps to use for training.
     """
-    total_steps = 74 * 3  # Total steps for 3 epochs
+    total_steps = 94 * 3  # Total steps for 3 epochs
     if train_step >= total_steps:
         return 17  # Cap timesteps at 17 after 3 epochs
     
