@@ -45,7 +45,7 @@ def calculate_max_timesteps(train_step):
     
     progress = train_step / total_steps  # Progress fraction [0, 1] over 3 epochs
     cos_value = 0.5 * (1 - torch.cos(torch.tensor(progress * torch.pi)))  # Flipped cosine
-    max_timesteps = int(2 + cos_value * (17 - 2))  # Scale from 2 to 17
+    max_timesteps = int(3 + cos_value * (17 - 3))  # Scale from 3 to 17
     return max_timesteps
 
 
