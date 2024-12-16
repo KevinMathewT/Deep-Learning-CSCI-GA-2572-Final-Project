@@ -3729,6 +3729,85 @@ class ActionRegularizationJEPA2Dv3(BaseModel):
         return output
 
 
+class Encoder(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.convnext = nn.Sequential(
+                nn.Conv2d(2, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False),
+                nn.BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True),
+                nn.ReLU(inplace=True),
+                nn.MaxPool2d(kernel_size=3, stride=2, padding=1, dilation=1, ceil_mode=False)
+            )
+    
+    def forward(self, x):
+        # Reshape input to merge batch and trajectory dimensions
+        # original_shape = x.shape
+        # x = x.view(-1, *original_shape[-3:])  # Reshape to [batch*trajectory, channels, height, width]
+        features = self.convnext(x)
+        
+        # Reshape features back to original trajectory structure
+        # features = features.view(original_shape[0], original_shape[1], *features.shape[-3:])
+        return features
+    
+
+class Predictor(nn.Module):
+    def __init__(self, input_dim=66, output_dim=64):
+        super().__init__()
+        self.predictor = nn.Sequential(
+            nn.Conv2d(input_dim, input_dim-2, kernel_size=3, padding=1),
+            nn.BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True),
+            nn.ReLU(),
+            nn.Conv2d(input_dim-2, output_dim, kernel_size=3, padding=1)
+        )
+    
+    def forward(self, encoded_o_t, action):
+        # Reshape inputs
+        batch_size, trajectory_length_sub_1 = action.shape[:2]
+        
+        # Reshape action to match encoded_o_t dimensions
+        action = action.view(batch_size, trajectory_length_sub_1, 2, 1, 1)
+        action = action.repeat(1, 1, 1, encoded_o_t.size(-2), encoded_o_t.size(-1)) # repeat across channel
+        
+        
+        # Prepare inputs for prediction
+        predictions = [encoded_o_t]
+        for t in range(trajectory_length_sub_1):
+            # Concatenate current encoded state with action
+            x = torch.cat([predictions[-1], action[:, t]], dim=1)
+            pred = self.predictor(x)
+            predictions.append(pred)
+        
+        return torch.stack(predictions, dim=1)
+
+
+class CombinedModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.encoder = Encoder()
+        self.predictor = Predictor()
+        self.repr_dim = 64 * 17 * 17
+
+    def forward(self, first_state, actions):
+        encoded = self.encoder(first_state)  # Store the initial encoded state
+        pred_encs = self.predictor(encoded, actions) # [BS, T, 512, 2, 2]
+        # Reshape pred_encs from [BS, T, 512, 2, 2] to [T, BS, 2048]
+        pred_encs = pred_encs.permute(1, 0, 2, 3, 4).reshape(pred_encs.shape[1], pred_encs.shape[0], -1)
+
+        return pred_encs
+
+
+class FinalModel(nn.Module):
+    def __init__(self, areg_vicreg_model, just_vicreg_model):
+        super(FinalModel, self).__init__()
+        self.areg_vicreg_model = areg_vicreg_model
+        self.just_vicreg_model = just_vicreg_model
+
+    def forward(self, first_state, actions):
+        if actions.size(1) > 18:  # Replace `condition` with your logic
+            return self.areg_vicreg_model(first_state, actions, teacher_forcing=False)
+        else:
+            return self.just_vicreg_model(first_state, actions)
+        
 
 # Model mapping and get_model function
 MODEL_MAP: Dict[str, BaseModel] = {
@@ -3755,3 +3834,24 @@ def get_model(model_name: str):
             f"Unknown model type: {model_name}. Available models are: {list(MODEL_MAP.keys())}"
         )
     return model_class
+
+
+if __name__ == "__main__":
+    import accelerate
+
+    acc = accelerate.Accelerator()
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    config = JEPAConfig.parse_from_file("config/areg_jepa_2d_config_v0.yaml")
+    config.steps_per_epoch = 999
+    areg_vicreg_model = ActionRegularizationJEPA2Dv0(config)
+    areg_vicreg_model.load_state_dict(torch.load('weights/best_expert_model_epoch_4_train_iter_76_normal_loss_21.21573_wall_loss_19.79489_expert_loss_85.14044.pt', map_location=device))
+    areg_vicreg_model.to(device)
+
+    just_vicreg_model = CombinedModel()
+    just_vicreg_model.load_state_dict(torch.load("weights/combined_model.pth", map_location=device))
+    just_vicreg_model.to(device)
+
+    final_model = FinalModel(areg_vicreg_model, just_vicreg_model)
+    final_model.to(device)
+    acc.save(final_model.state_dict(), "weights/final_model.pth")
