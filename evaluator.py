@@ -146,7 +146,6 @@ class ProbingEvaluator:
                     for i in range(bs):
                         indices = torch.randperm(n_steps)[: config.sample_timesteps]
                         sampled_pred_encs[:, i, :] = pred_encs[indices, i, :]
-                        print(f"sampled_pred_encs shape {sampled_pred_encs.shape} | target shape {target.shape} | target[i, indices].shape {target[i, indices].shape} | i: {i} | indices: {indices}")
                         sampled_target_locs[i, :] = target[i, indices]
 
                     pred_encs = sampled_pred_encs
