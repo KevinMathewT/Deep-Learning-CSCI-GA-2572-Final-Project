@@ -49,25 +49,6 @@ def calculate_max_timesteps(train_step):
     return max_timesteps
 
 
-def get_subsequences(data, seq_len):
-    """
-    Generates all possible subsequences of length seq_len from the input data.
-    Args:
-        data (Tensor): Input tensor of shape (B, T, ...).
-        seq_len (int): Desired sequence length.
-    Returns:
-        Tensor: Subsequence tensor of shape (B * num_slices, seq_len, ...).
-    """
-    B, T = data.shape[:2]
-    num_slices = T - seq_len + 1
-    slices = []
-    for b in range(B):
-        for i in range(num_slices):
-            slices.append(data[b, i:i+seq_len])
-    new_data = torch.stack(slices, dim=0)
-    return new_data  # shape (B * num_slices, seq_len, ...)
-
-
 
 def get_free_gpu():
     try:

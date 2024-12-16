@@ -1,6 +1,6 @@
-probe_normal 4.670985698699951
-probe_wall 8.15967845916748
-probe_expert 76.67459106445312
-probe_wall_other 7.758280277252197
-model parameter count 88,997
-training command 
+probe_normal: 4.40186071395874
+probe_wall: 7.584475517272949
+probe_expert: 84.84354400634766
+probe_wall_other: 7.622894287109375
+model parameter count: 88,997
+training command: python -m main

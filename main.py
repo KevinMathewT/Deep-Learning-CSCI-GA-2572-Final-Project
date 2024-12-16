@@ -87,7 +87,7 @@ def load_model():
     # model.cuda()
 
     model = FinalModel(config)
-    model.load_state_dict(torch.load('weights/final_model.pth'))
+    model.load_state_dict(torch.load('model_weights.pth'))
     model.cuda()
 
     return model

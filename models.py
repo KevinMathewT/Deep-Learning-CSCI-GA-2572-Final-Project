@@ -8,7 +8,7 @@ import timm
 
 from optimizer import get_optimizer, get_scheduler
 from configs import JEPAConfig
-from utils import get_subsequences, calculate_max_timesteps
+from utils import calculate_max_timesteps
 
 from typing import Dict
 
