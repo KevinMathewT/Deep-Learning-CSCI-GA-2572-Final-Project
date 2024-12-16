@@ -29,21 +29,24 @@ def seed_everything(seed=42):
 
 
 def calculate_max_timesteps(train_step):
-        """
-        Calculate max timesteps for input based on train_step using a cosine increasing function.
-        The timesteps grow from 2 to 17 over the first 3 epochs.
+    """
+    Calculate max timesteps for input based on train_step using a cosine increasing function.
+    The timesteps grow from 2 to 17 over the first 3 epochs, and stay at 17 afterward.
 
-        Args:
-            train_step: Current training step.
+    Args:
+        train_step: Current training step.
 
-        Returns:
-            max_timesteps: Number of timesteps to use for training.
-        """
-        total_steps = 74 * 3  # Total steps for 3 epochs
-        progress = min(train_step / total_steps, 1.0)  # Ensure progress is capped at 1.0
-        cos_value = 0.5 * (1 + torch.cos(torch.tensor(progress * torch.pi)))
-        max_timesteps = 2 + int(cos_value * (17 - 2))  # Scale from 2 to 17
-        return max_timesteps
+    Returns:
+        max_timesteps: Number of timesteps to use for training.
+    """
+    total_steps = 74 * 3  # Total steps for 3 epochs
+    if train_step >= total_steps:
+        return 17  # Cap timesteps at 17 after 3 epochs
+    
+    progress = train_step / total_steps  # Progress fraction [0, 1] over 3 epochs
+    cos_value = 0.5 * (1 - torch.cos(torch.tensor(progress * torch.pi)))  # Flipped cosine
+    max_timesteps = int(2 + cos_value * (17 - 2))  # Scale from 2 to 17
+    return max_timesteps
 
 
 def get_subsequences(data, seq_len):
