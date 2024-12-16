@@ -1,0 +1,6 @@
+probe_normal 9.897970199584961
+probe_wall 10.876693725585938
+probe_expert 64.66554260253906
+probe_wall_other 10.096221923828125
+model parameter count
+training command
