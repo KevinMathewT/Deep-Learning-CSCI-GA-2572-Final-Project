@@ -3,7 +3,7 @@ import glob
 import wandb
 from accelerate import Accelerator
 import torch
-from dataset import WallDataset
+from optimized_dataset import WallDataset
 from main import evaluate_model, load_data, load_expert_data
 from models import get_model
 from tqdm import tqdm
