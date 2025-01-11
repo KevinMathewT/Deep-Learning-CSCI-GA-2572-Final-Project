@@ -2,7 +2,7 @@
 
 ## Overview
 
-In this project, you will train a JEPA world model on a set of pre-collected trajectories from a toy environment involving an agent in two rooms.
+In this project, we train a JEPA world model on a set of pre-collected trajectories from a toy environment involving an agent in two rooms.
 
 
 ### JEPA
@@ -49,7 +49,7 @@ Here's a diagram illustrating a recurrent JEPA for 4 timesteps:
 
 ### Environment and data set
 
-The dataset consists of random trajectories collected from a toy environment consisting of an agent (dot) in two rooms separated by a wall. There's a door in a wall.  The agent cannot travel through the border wall or middle wall (except through the door). Different trajectories may have different wall and door positions. Thus your JEPA model needs to be able to perceive and distinguish environment layouts. Two training trajectories with different layouts are depicted below.
+The dataset consists of random trajectories collected from a toy environment consisting of an agent (dot) in two rooms separated by a wall. There's a door in a wall.  The agent cannot travel through the border wall or middle wall (except through the door). Different trajectories may have different wall and door positions. Thus our JEPA model needs to be able to perceive and distinguish environment layouts. Two training trajectories with different layouts are depicted below.
 
 <img src="assets/two_rooms.png" alt="Alt Text" width="500"/>
 
